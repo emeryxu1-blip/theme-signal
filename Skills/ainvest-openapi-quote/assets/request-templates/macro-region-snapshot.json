@@ -1,0 +1,25 @@
+{
+  "symbol": [
+    {
+      "type": "macro_region",
+      "value": [
+        "US",
+        "CN"
+      ]
+    }
+  ],
+  "indicator": [
+    {
+      "id": "GDP",
+      "req_unique_id": "GDP"
+    },
+    {
+      "id": "CPI",
+      "req_unique_id": "CPI"
+    }
+  ],
+  "page": {
+    "begin": 0,
+    "count": 10
+  }
+}

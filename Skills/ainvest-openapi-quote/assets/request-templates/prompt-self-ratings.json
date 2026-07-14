@@ -1,0 +1,30 @@
+{
+  "symbol": [
+    {
+      "type": "prompt_id_self",
+      "value": ["6908b551069a48065f15938d", "6908b52b069a48065f15938c"]
+    }
+  ],
+  "indicator": [
+    {
+      "id": "fund_overall_rating",
+      "req_unique_id": "overall_rating"
+    },
+    {
+      "id": "fund_flow_rating",
+      "req_unique_id": "flow_rating"
+    },
+    {
+      "id": "fund_fundamental_rating",
+      "req_unique_id": "fundamental_rating"
+    },
+    {
+      "id": "fund_momentum_rating",
+      "req_unique_id": "momentum_rating"
+    }
+  ],
+  "page": {
+    "begin": 0,
+    "count": 2
+  }
+}

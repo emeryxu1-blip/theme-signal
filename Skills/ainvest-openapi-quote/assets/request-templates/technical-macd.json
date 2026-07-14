@@ -1,0 +1,72 @@
+{
+  "symbol": [
+    {
+      "type": "market_code",
+      "value": ["169:BABA", "185:QQQ"]
+    }
+  ],
+  "indicator": [
+    {
+      "id": "68317",
+      "req_unique_id": "macd_diff",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Short-term",
+            "value": 12
+          },
+          {
+            "param": "Long-term",
+            "value": 26
+          },
+          {
+            "param": "M",
+            "value": 9
+          },
+          {
+            "param": "indicator_component",
+            "value": "DIFF"
+          }
+        ]
+      }
+    },
+    {
+      "id": "68317",
+      "req_unique_id": "macd_dea",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Short-term",
+            "value": 12
+          },
+          {
+            "param": "Long-term",
+            "value": 26
+          },
+          {
+            "param": "M",
+            "value": 9
+          },
+          {
+            "param": "indicator_component",
+            "value": "DEA"
+          }
+        ]
+      }
+    }
+  ],
+  "sort": [
+    {
+      "pos": 0,
+      "order": "desc"
+    }
+  ],
+  "page": {
+    "begin": 0,
+    "count": 2
+  }
+}

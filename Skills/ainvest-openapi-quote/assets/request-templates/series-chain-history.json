@@ -1,0 +1,21 @@
+{
+  "symbol": {
+    "type": "chain_id",
+    "value": ["L000000006"]
+  },
+  "indicator": [
+    {
+      "id": "block_average_fee_rate",
+      "req_unique_id": "avg_fee_rate",
+      "attr": {
+        "time_period": "day_1"
+      }
+    }
+  ],
+  "time_range": {
+    "type": "end_count",
+    "end_time": 0,
+    "count": 2,
+    "time_period": "day_1"
+  }
+}

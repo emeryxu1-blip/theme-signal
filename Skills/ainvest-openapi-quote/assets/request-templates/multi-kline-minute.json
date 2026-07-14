@@ -1,0 +1,15 @@
+{
+  "code_list": [
+    {
+      "market": "185",
+      "codes": ["AAPL", "TSLA"]
+    }
+  ],
+  "trade_class": "intraday",
+  "time_period": "min_1",
+  "time_range": {
+    "trade_date": 0,
+    "date_offset": 0
+  },
+  "adjust_type": "forward"
+}

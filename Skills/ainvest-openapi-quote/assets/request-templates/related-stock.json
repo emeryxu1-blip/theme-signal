@@ -1,0 +1,34 @@
+{
+  "symbol": [
+    {
+      "type": "prompt_id",
+      "value": ["67aeeb7c5a963469b5ef9a6d"],
+      "attr": {
+        "market_code": "185:AAPL"
+      }
+    }
+  ],
+  "indicator": [
+    {
+      "id": "10",
+      "req_unique_id": "latest_price",
+      "attr": {
+        "trade_class": "intraday"
+      }
+    },
+    {
+      "id": "55",
+      "req_unique_id": "security_name"
+    }
+  ],
+  "sort": [
+    {
+      "pos": 0,
+      "order": "desc"
+    }
+  ],
+  "page": {
+    "begin": 0,
+    "count": 10
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "symbol": {
+    "type": "market_code",
+    "value": ["185:QQQ"]
+  },
+  "indicator": [
+    {
+      "id": "fund_nav",
+      "req_unique_id": "nav_30d",
+      "attr": {
+        "time_period": "day_1"
+      }
+    }
+  ],
+  "time_range": {
+    "type": "end_count",
+    "end_time": 0,
+    "count": 30,
+    "time_period": "day_1"
+  }
+}

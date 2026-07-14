@@ -1,0 +1,49 @@
+{
+  "symbol": [
+    {
+      "type": "market_code",
+      "value": ["185:AAPL"]
+    }
+  ],
+  "indicator": [
+    {
+      "id": "8",
+      "req_unique_id": "high_price",
+      "attr": {
+        "trade_class": "intraday"
+      }
+    },
+    {
+      "id": "9",
+      "req_unique_id": "low_price",
+      "attr": {
+        "trade_class": "intraday"
+      }
+    },
+    {
+      "id": "7",
+      "req_unique_id": "open_price",
+      "attr": {
+        "trade_class": "intraday"
+      }
+    },
+    {
+      "id": "6",
+      "req_unique_id": "prev_close",
+      "attr": {
+        "trade_class": "intraday"
+      }
+    },
+    {
+      "id": "10",
+      "req_unique_id": "latest_price",
+      "attr": {
+        "trade_class": "intraday"
+      }
+    }
+  ],
+  "page": {
+    "begin": 0,
+    "count": 1
+  }
+}

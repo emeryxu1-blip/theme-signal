@@ -1,0 +1,39 @@
+{
+  "symbol": [
+    {
+      "type": "market_code",
+      "value": [
+        "UBAX:BTCUSDT",
+        "UBAF:BTCUSDT.P",
+        "U31X:BTCUSDT",
+        "U31F:BTCUSDT.P"
+      ]
+    }
+  ],
+  "indicator": [
+    {
+      "id": "10",
+      "req_unique_id": "latest_price"
+    },
+    {
+      "id": "55",
+      "req_unique_id": "security_name"
+    },
+    {
+      "id": "sec_type",
+      "req_unique_id": "security_type"
+    },
+    {
+      "id": "sec_type_en",
+      "req_unique_id": "security_type_en"
+    },
+    {
+      "id": "trade_currency",
+      "req_unique_id": "trade_currency"
+    }
+  ],
+  "page": {
+    "begin": 0,
+    "count": 4
+  }
+}

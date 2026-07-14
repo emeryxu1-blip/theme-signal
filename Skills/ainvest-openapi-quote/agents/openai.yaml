@@ -1,0 +1,4 @@
+interface:
+  display_name: "AInvest OpenAPI Quote"
+  short_description: "Build or execute AInvest quote requests and refresh Tangram indicator lookup metadata"
+  default_prompt: "Use $ainvest-openapi-quote to generate an AInvest quote request, fetch live quote data, or refresh local Tangram-exported indicator metadata. On first use in a conversation, check local metadata freshness with scripts/export_indicators.py --status and ask whether to update. Choose sandbox Aime Claw with AIME_API_KEY by default. For B-side apisix context, use the caller-provided apikey header and choose index-api apikey for indicator endpoints or quoteag apikey for quote endpoints. For C-side public quote domains, use the caller-provided Cookie header."

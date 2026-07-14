@@ -1,0 +1,19 @@
+{
+  "symbol": [
+    {
+      "type": "group_id_self",
+      "value": ["185:ALLW:1"]
+    }
+  ],
+  "indicator": [
+    {
+      "id": "55",
+      "req_unique_id": "security_name"
+    }
+  ],
+  "page": {
+    "begin": 0,
+    "count": 20
+  },
+  "full_symbols": true
+}

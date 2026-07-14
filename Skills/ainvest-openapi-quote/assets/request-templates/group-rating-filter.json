@@ -1,0 +1,38 @@
+{
+  "symbol": [
+    {
+      "type": "group_id",
+      "value": ["etf-rating-prompt-list"]
+    }
+  ],
+  "indicator": [
+    {
+      "id": "fund_overall_rating",
+      "req_unique_id": "overall_rating"
+    },
+    {
+      "id": "fund_overall_rating_diff_30d",
+      "req_unique_id": "rating_diff_30d"
+    }
+  ],
+  "sort": [
+    {
+      "pos": 1,
+      "order": "desc"
+    }
+  ],
+  "page": {
+    "begin": 0,
+    "count": 10
+  },
+  "filter": {
+    "type": "json_expr",
+    "condition": [
+      {
+        "pos": 0,
+        "op": "between",
+        "value": [4, 7]
+      }
+    ]
+  }
+}

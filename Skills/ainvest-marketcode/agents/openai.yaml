@@ -1,0 +1,7 @@
+interface:
+  display_name: "AInvest Market Code"
+  short_description: "Resolve or enumerate AInvest market_code values"
+  default_prompt: "Use $ainvest-marketcode to resolve a ticker, name, or market hint into AInvest market_code, or to enumerate code universes such as all ETFs, all ordinary stocks, all bonds, all crypto spot pairs, Binance derivatives, GICS industry index levels, or industry constituent stocks. Use codes-only or count-only output when the user only wants the final code list or count."
+
+policy:
+  allow_implicit_invocation: true

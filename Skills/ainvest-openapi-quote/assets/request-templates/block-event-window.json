@@ -1,0 +1,34 @@
+{
+  "symbol": [
+    {
+      "type": "block_id",
+      "value": ["C191"]
+    }
+  ],
+  "indicator": [
+    {
+      "id": "ext_metric_event_return",
+      "req_unique_id": "event_return",
+      "attr": {
+        "event_id": "AI_2023.03.14-2023.12.06"
+      }
+    },
+    {
+      "id": "ext_metric_event_vs_spy",
+      "req_unique_id": "event_vs_spy",
+      "attr": {
+        "event_id": "AI_2023.03.14-2023.12.06"
+      }
+    }
+  ],
+  "sort": [
+    {
+      "pos": 0,
+      "order": "desc"
+    }
+  ],
+  "page": {
+    "begin": 0,
+    "count": 5
+  }
+}

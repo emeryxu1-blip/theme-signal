@@ -1,0 +1,667 @@
+{
+  "symbol": [
+    {
+      "type": "market_code",
+      "value": [
+        "185:AAPL",
+        "185:NVDA",
+        "185:QQQ",
+        "169:SPY"
+      ]
+    }
+  ],
+  "indicator": [
+    {
+      "id": "265372",
+      "req_unique_id": "265372_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "N1",
+            "value": 10
+          },
+          {
+            "param": "indicator_component",
+            "value": "MA"
+          }
+        ]
+      }
+    },
+    {
+      "id": "265380",
+      "req_unique_id": "265380_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "N",
+            "value": 20
+          },
+          {
+            "param": "indicator_component",
+            "value": "MID"
+          }
+        ]
+      }
+    },
+    {
+      "id": "265381",
+      "req_unique_id": "265381_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "N1",
+            "value": 10
+          },
+          {
+            "param": "indicator_component",
+            "value": "EMA"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967262",
+      "req_unique_id": "4294967262_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "indicator_component",
+            "value": "P"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967263",
+      "req_unique_id": "4294967263_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "indicator_component",
+            "value": "P"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967264",
+      "req_unique_id": "4294967264_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "indicator_component",
+            "value": "P"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967265",
+      "req_unique_id": "4294967265_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "indicator_component",
+            "value": "P"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967266",
+      "req_unique_id": "4294967266_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "indicator_component",
+            "value": "P"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967267",
+      "req_unique_id": "4294967267_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 20
+          },
+          {
+            "param": "indicator_component",
+            "value": "VWMA"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967268",
+      "req_unique_id": "4294967268_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 14
+          },
+          {
+            "param": "indicator_component",
+            "value": "RSI"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967269",
+      "req_unique_id": "4294967269_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 9
+          },
+          {
+            "param": "indicator_component",
+            "value": "ROC"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967270",
+      "req_unique_id": "4294967270_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "indicator_component",
+            "value": "ParabolicSAR"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967271",
+      "req_unique_id": "4294967271_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 14
+          },
+          {
+            "param": "indicator_component",
+            "value": "MFI"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967272",
+      "req_unique_id": "4294967272_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 10
+          },
+          {
+            "param": "indicator_component",
+            "value": "MOM"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967273",
+      "req_unique_id": "4294967273_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 20
+          },
+          {
+            "param": "Multiplier",
+            "value": 2
+          },
+          {
+            "param": "ATR Length",
+            "value": 10
+          },
+          {
+            "param": "indicator_component",
+            "value": "Upper"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967274",
+      "req_unique_id": "4294967274_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "DI Length",
+            "value": 14
+          },
+          {
+            "param": "ADX Smoothing",
+            "value": 14
+          },
+          {
+            "param": "indicator_component",
+            "value": "ADX"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967275",
+      "req_unique_id": "4294967275_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 20
+          },
+          {
+            "param": "indicator_component",
+            "value": "CCI"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967276",
+      "req_unique_id": "4294967276_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 20
+          },
+          {
+            "param": "indicator_component",
+            "value": "CMF"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967277",
+      "req_unique_id": "4294967277_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 13
+          },
+          {
+            "param": "indicator_component",
+            "value": "BBPower"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967278",
+      "req_unique_id": "4294967278_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 14
+          },
+          {
+            "param": "indicator_component",
+            "value": "ATR%"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967279",
+      "req_unique_id": "4294967279_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 14
+          },
+          {
+            "param": "indicator_component",
+            "value": "ADR%"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967280",
+      "req_unique_id": "4294967280_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 14
+          },
+          {
+            "param": "indicator_component",
+            "value": "ADR"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967281",
+      "req_unique_id": "4294967281_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 14
+          },
+          {
+            "param": "indicator_component",
+            "value": "Aroon Up"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967282",
+      "req_unique_id": "4294967282_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Conversion Line Length",
+            "value": 9
+          },
+          {
+            "param": "Base Line Length",
+            "value": 26
+          },
+          {
+            "param": "Leading Span B Length",
+            "value": 52
+          },
+          {
+            "param": "Lagging Span",
+            "value": 26
+          },
+          {
+            "param": "indicator_component",
+            "value": "Conversion Line"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967283",
+      "req_unique_id": "4294967283_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "K",
+            "value": 3
+          },
+          {
+            "param": "D",
+            "value": 3
+          },
+          {
+            "param": "RSI Length",
+            "value": 14
+          },
+          {
+            "param": "Stochastic Length",
+            "value": 14
+          },
+          {
+            "param": "indicator_component",
+            "value": "K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967284",
+      "req_unique_id": "4294967284_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Fast Length",
+            "value": 7
+          },
+          {
+            "param": "Middle Length",
+            "value": 14
+          },
+          {
+            "param": "Slow Length",
+            "value": 28
+          },
+          {
+            "param": "indicator_component",
+            "value": "HMA"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967287",
+      "req_unique_id": "4294967287_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 9
+          },
+          {
+            "param": "indicator_component",
+            "value": "HMA"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967288",
+      "req_unique_id": "4294967288_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "indicator_component",
+            "value": "AO"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967290",
+      "req_unique_id": "4294967290_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "%K Length",
+            "value": 5
+          },
+          {
+            "param": "%K Smoothing",
+            "value": 3
+          },
+          {
+            "param": "%D Smoothing",
+            "value": 3
+          },
+          {
+            "param": "indicator_component",
+            "value": "%K"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967292",
+      "req_unique_id": "4294967292_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Bands Multiplier",
+            "value": 1
+          },
+          {
+            "param": "indicator_component",
+            "value": "VWAP"
+          }
+        ]
+      }
+    },
+    {
+      "id": "4294967293",
+      "req_unique_id": "4294967293_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Length",
+            "value": 14
+          },
+          {
+            "param": "indicator_component",
+            "value": "ATR"
+          }
+        ]
+      }
+    },
+    {
+      "id": "68317",
+      "req_unique_id": "68317_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Short-term",
+            "value": 12
+          },
+          {
+            "param": "Long-term",
+            "value": 26
+          },
+          {
+            "param": "M",
+            "value": 9
+          },
+          {
+            "param": "indicator_component",
+            "value": "DIFF"
+          }
+        ]
+      }
+    },
+    {
+      "id": "68320",
+      "req_unique_id": "68320_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "Standard Deviation",
+            "value": 20
+          },
+          {
+            "param": "Width",
+            "value": 2
+          },
+          {
+            "param": "indicator_component",
+            "value": "MID"
+          }
+        ]
+      }
+    },
+    {
+      "id": "68321",
+      "req_unique_id": "68321_tech_day1",
+      "attr": {
+        "trade_class": "intraday",
+        "time_period": "day_1",
+        "tech_param": [
+          {
+            "param": "N",
+            "value": 14
+          },
+          {
+            "param": "indicator_component",
+            "value": "WR"
+          }
+        ]
+      }
+    }
+  ],
+  "page": {
+    "begin": 0,
+    "count": 4
+  }
+}

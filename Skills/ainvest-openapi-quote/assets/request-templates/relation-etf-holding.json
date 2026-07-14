@@ -1,0 +1,9 @@
+{
+  "relation": "holding",
+  "symbol": "185:QQQ",
+  "symbol_type": "market_code",
+  "page": {
+    "begin": 0,
+    "count": 10
+  }
+}

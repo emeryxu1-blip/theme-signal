@@ -1,0 +1,20 @@
+# Local credentials and session state
+Skills/env.json
+.env
+.env.*
+!.env.example
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local workflow inputs, outputs, and logs
+theme_investing/my_input.json
+theme_investing/result.json
+theme_investing/result_claude.json
+theme_investing/run.log
+theme_investing/run_claude.log
+
+# macOS
+.DS_Store

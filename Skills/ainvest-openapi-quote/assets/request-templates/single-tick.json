@@ -1,0 +1,14 @@
+{
+  "code_list": [
+    {
+      "market": "185",
+      "codes": ["AAPL"]
+    }
+  ],
+  "trade_class": "intraday",
+  "time_range": {
+    "trade_date": 0,
+    "count": 20,
+    "end_time": 0
+  }
+}

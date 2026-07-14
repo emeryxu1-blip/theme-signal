@@ -1,0 +1,31 @@
+{
+  "symbol": [
+    {
+      "type": "market",
+      "value": ["UAOS"]
+    }
+  ],
+  "indicator": [
+    {
+      "id": "10",
+      "req_unique_id": "latest_price",
+      "attr": {
+        "trade_class": "intraday"
+      }
+    },
+    {
+      "id": "security_name",
+      "req_unique_id": "security_name"
+    }
+  ],
+  "sort": [
+    {
+      "pos": 0,
+      "order": "desc"
+    }
+  ],
+  "page": {
+    "begin": 0,
+    "count": 20
+  }
+}

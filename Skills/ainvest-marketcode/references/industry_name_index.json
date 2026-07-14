@@ -1,0 +1,4688 @@
+[
+  {
+    "level": 1,
+    "market_code": "89:861070",
+    "english_name": "Energy",
+    "chinese_aliases": [
+      "能源",
+      "能源行业"
+    ],
+    "english_aliases": [
+      "energy"
+    ],
+    "path_en": [
+      "Overseas GICS industry",
+      "Energy"
+    ],
+    "search_names": [
+      "Energy",
+      "energy",
+      "能源",
+      "能源行业"
+    ]
+  },
+  {
+    "level": 1,
+    "market_code": "89:861071",
+    "english_name": "Materials",
+    "chinese_aliases": [
+      "材料",
+      "材料行业"
+    ],
+    "english_aliases": [
+      "materials"
+    ],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials"
+    ],
+    "search_names": [
+      "Materials",
+      "materials",
+      "材料",
+      "材料行业"
+    ]
+  },
+  {
+    "level": 1,
+    "market_code": "89:861072",
+    "english_name": "Industrials",
+    "chinese_aliases": [
+      "工业",
+      "工业行业"
+    ],
+    "english_aliases": [
+      "industrials"
+    ],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials"
+    ],
+    "search_names": [
+      "Industrials",
+      "industrials",
+      "工业",
+      "工业行业"
+    ]
+  },
+  {
+    "level": 1,
+    "market_code": "89:861073",
+    "english_name": "Consumer Discretionary",
+    "chinese_aliases": [
+      "可选消费",
+      "可选消费行业",
+      "非必需消费品"
+    ],
+    "english_aliases": [
+      "consumerdiscretionary"
+    ],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary"
+    ],
+    "search_names": [
+      "Consumer Discretionary",
+      "consumerdiscretionary",
+      "可选消费",
+      "可选消费行业",
+      "非必需消费品"
+    ]
+  },
+  {
+    "level": 1,
+    "market_code": "89:861074",
+    "english_name": "Consumer Staples",
+    "chinese_aliases": [
+      "必需消费品",
+      "日常消费",
+      "日常消费行业"
+    ],
+    "english_aliases": [
+      "consumerstaples"
+    ],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples"
+    ],
+    "search_names": [
+      "Consumer Staples",
+      "consumerstaples",
+      "必需消费品",
+      "日常消费",
+      "日常消费行业"
+    ]
+  },
+  {
+    "level": 1,
+    "market_code": "89:861075",
+    "english_name": "Health Care",
+    "chinese_aliases": [
+      "医疗保健",
+      "医疗保健行业",
+      "医药健康"
+    ],
+    "english_aliases": [
+      "healthcare"
+    ],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care"
+    ],
+    "search_names": [
+      "Health Care",
+      "healthcare",
+      "医疗保健",
+      "医疗保健行业",
+      "医药健康"
+    ]
+  },
+  {
+    "level": 1,
+    "market_code": "89:861076",
+    "english_name": "Financials",
+    "chinese_aliases": [
+      "金融",
+      "金融行业"
+    ],
+    "english_aliases": [
+      "financials"
+    ],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials"
+    ],
+    "search_names": [
+      "Financials",
+      "financials",
+      "金融",
+      "金融行业"
+    ]
+  },
+  {
+    "level": 1,
+    "market_code": "89:861077",
+    "english_name": "Information Technology",
+    "chinese_aliases": [
+      "信息技术",
+      "信息技术行业",
+      "科技"
+    ],
+    "english_aliases": [
+      "informationtechnology"
+    ],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology"
+    ],
+    "search_names": [
+      "Information Technology",
+      "informationtechnology",
+      "信息技术",
+      "信息技术行业",
+      "科技"
+    ]
+  },
+  {
+    "level": 1,
+    "market_code": "89:861078",
+    "english_name": "Communication Services",
+    "chinese_aliases": [
+      "通信服务",
+      "通信服务行业"
+    ],
+    "english_aliases": [
+      "communicationservices"
+    ],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services"
+    ],
+    "search_names": [
+      "Communication Services",
+      "communicationservices",
+      "通信服务",
+      "通信服务行业"
+    ]
+  },
+  {
+    "level": 1,
+    "market_code": "89:861079",
+    "english_name": "Utilities",
+    "chinese_aliases": [
+      "公用事业",
+      "公用事业行业"
+    ],
+    "english_aliases": [
+      "utilities"
+    ],
+    "path_en": [
+      "Overseas GICS industry",
+      "Utilities"
+    ],
+    "search_names": [
+      "Utilities",
+      "utilities",
+      "公用事业",
+      "公用事业行业"
+    ]
+  },
+  {
+    "level": 1,
+    "market_code": "89:861080",
+    "english_name": "Real Estate",
+    "chinese_aliases": [
+      "房地产",
+      "房地产行业"
+    ],
+    "english_aliases": [
+      "realestate"
+    ],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate"
+    ],
+    "search_names": [
+      "Real Estate",
+      "realestate",
+      "房地产",
+      "房地产行业"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861081",
+    "english_name": "Energy",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Energy",
+      "Energy"
+    ],
+    "search_names": [
+      "Energy"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861082",
+    "english_name": "Materials",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials"
+    ],
+    "search_names": [
+      "Materials"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861083",
+    "english_name": "Capital Goods",
+    "chinese_aliases": [
+      "资本货物"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods"
+    ],
+    "search_names": [
+      "Capital Goods",
+      "资本货物"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861084",
+    "english_name": "Commercial & Professional Services",
+    "chinese_aliases": [
+      "商业和专业服务"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Commercial & Professional Services"
+    ],
+    "search_names": [
+      "Commercial & Professional Services",
+      "商业和专业服务"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861085",
+    "english_name": "Transportation",
+    "chinese_aliases": [
+      "运输"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation"
+    ],
+    "search_names": [
+      "Transportation",
+      "运输"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861086",
+    "english_name": "Automobiles & Components",
+    "chinese_aliases": [
+      "汽车和零部件"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Automobiles & Components"
+    ],
+    "search_names": [
+      "Automobiles & Components",
+      "汽车和零部件"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861087",
+    "english_name": "Consumer Durables & Apparel",
+    "chinese_aliases": [
+      "耐用消费品与服装"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Durables & Apparel"
+    ],
+    "search_names": [
+      "Consumer Durables & Apparel",
+      "耐用消费品与服装"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861088",
+    "english_name": "Consumer Services",
+    "chinese_aliases": [
+      "消费者服务"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Services"
+    ],
+    "search_names": [
+      "Consumer Services",
+      "消费者服务"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861089",
+    "english_name": "Consumer Discretionary Distribution & Retail",
+    "chinese_aliases": [
+      "可选消费品分销与零售"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Discretionary Distribution & Retail"
+    ],
+    "search_names": [
+      "Consumer Discretionary Distribution & Retail",
+      "可选消费品分销与零售"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861090",
+    "english_name": "Consumer Staples Distribution & Retail",
+    "chinese_aliases": [
+      "必需消费品分销与零售"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Consumer Staples Distribution & Retail"
+    ],
+    "search_names": [
+      "Consumer Staples Distribution & Retail",
+      "必需消费品分销与零售"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861091",
+    "english_name": "Food, Beverage & Tobacco",
+    "chinese_aliases": [
+      "食品饮料烟草"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Food, Beverage & Tobacco"
+    ],
+    "search_names": [
+      "Food, Beverage & Tobacco",
+      "食品饮料烟草"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861092",
+    "english_name": "Household & Personal Products",
+    "chinese_aliases": [
+      "家庭与个人用品"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Household & Personal Products"
+    ],
+    "search_names": [
+      "Household & Personal Products",
+      "家庭与个人用品"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861093",
+    "english_name": "Health Care Equipment & Services",
+    "chinese_aliases": [
+      "医疗保健设备与服务"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Health Care Equipment & Services"
+    ],
+    "search_names": [
+      "Health Care Equipment & Services",
+      "医疗保健设备与服务"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861094",
+    "english_name": "Pharmaceuticals, Biotechnology & Life Sciences",
+    "chinese_aliases": [
+      "制药生物科技与生命科学"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Pharmaceuticals, Biotechnology & Life Sciences"
+    ],
+    "search_names": [
+      "Pharmaceuticals, Biotechnology & Life Sciences",
+      "制药生物科技与生命科学"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861095",
+    "english_name": "Banks",
+    "chinese_aliases": [
+      "银行"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Banks"
+    ],
+    "search_names": [
+      "Banks",
+      "银行"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861096",
+    "english_name": "Financial Services",
+    "chinese_aliases": [
+      "金融服务"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services"
+    ],
+    "search_names": [
+      "Financial Services",
+      "金融服务"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861097",
+    "english_name": "Insurance",
+    "chinese_aliases": [
+      "保险"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Insurance"
+    ],
+    "search_names": [
+      "Insurance",
+      "保险"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861098",
+    "english_name": "Software & Services",
+    "chinese_aliases": [
+      "软件与服务"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Software & Services"
+    ],
+    "search_names": [
+      "Software & Services",
+      "软件与服务"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861099",
+    "english_name": "Technology Hardware & Equipment",
+    "chinese_aliases": [
+      "技术硬件与设备",
+      "科技硬件与设备"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Technology Hardware & Equipment"
+    ],
+    "search_names": [
+      "Technology Hardware & Equipment",
+      "技术硬件与设备",
+      "科技硬件与设备"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861100",
+    "english_name": "Semiconductors & Semiconductor Equipment",
+    "chinese_aliases": [
+      "半导体与半导体设备"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Semiconductors & Semiconductor Equipment"
+    ],
+    "search_names": [
+      "Semiconductors & Semiconductor Equipment",
+      "半导体与半导体设备"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861101",
+    "english_name": "Telecommunication Services",
+    "chinese_aliases": [
+      "电信服务"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Telecommunication Services"
+    ],
+    "search_names": [
+      "Telecommunication Services",
+      "电信服务"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861102",
+    "english_name": "Media & Entertainment",
+    "chinese_aliases": [
+      "媒体与娱乐"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Media & Entertainment"
+    ],
+    "search_names": [
+      "Media & Entertainment",
+      "媒体与娱乐"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861103",
+    "english_name": "Utilities",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Utilities",
+      "Utilities"
+    ],
+    "search_names": [
+      "Utilities"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861104",
+    "english_name": "Equity Real Estate Investment Trusts (REITs)",
+    "chinese_aliases": [
+      "房地产投资信托",
+      "权益型房地产投资信托"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)"
+    ],
+    "search_names": [
+      "Equity Real Estate Investment Trusts (REITs)",
+      "房地产投资信托",
+      "权益型房地产投资信托"
+    ]
+  },
+  {
+    "level": 2,
+    "market_code": "89:861263",
+    "english_name": "Real Estate Management & Development",
+    "chinese_aliases": [
+      "房地产管理与开发"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Real Estate Management & Development"
+    ],
+    "search_names": [
+      "Real Estate Management & Development",
+      "房地产管理与开发"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861001",
+    "english_name": "Energy Equipment & Services",
+    "chinese_aliases": [
+      "油气设备与服务",
+      "油气设备服务",
+      "能源设备与服务",
+      "能源设备服务"
+    ],
+    "english_aliases": [
+      "energyequipmentservices"
+    ],
+    "path_en": [
+      "Overseas GICS industry",
+      "Energy",
+      "Energy",
+      "Energy Equipment & Services"
+    ],
+    "search_names": [
+      "Energy Equipment & Services",
+      "energyequipmentservices",
+      "油气设备与服务",
+      "油气设备服务",
+      "能源设备与服务",
+      "能源设备服务"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861002",
+    "english_name": "Oil, Gas & Consumable Fuels",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Energy",
+      "Energy",
+      "Oil, Gas & Consumable Fuels"
+    ],
+    "search_names": [
+      "Oil, Gas & Consumable Fuels"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861003",
+    "english_name": "Chemicals",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Chemicals"
+    ],
+    "search_names": [
+      "Chemicals"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861004",
+    "english_name": "Construction Materials",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Construction Materials"
+    ],
+    "search_names": [
+      "Construction Materials"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861005",
+    "english_name": "Containers & Packaging",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Containers & Packaging"
+    ],
+    "search_names": [
+      "Containers & Packaging"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861006",
+    "english_name": "Metals & Mining",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Metals & Mining"
+    ],
+    "search_names": [
+      "Metals & Mining"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861007",
+    "english_name": "Paper & Forest Products",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Paper & Forest Products"
+    ],
+    "search_names": [
+      "Paper & Forest Products"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861008",
+    "english_name": "Aerospace & Defense",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Aerospace & Defense"
+    ],
+    "search_names": [
+      "Aerospace & Defense"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861009",
+    "english_name": "Building Products",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Building Products"
+    ],
+    "search_names": [
+      "Building Products"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861010",
+    "english_name": "Construction & Engineering",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Construction & Engineering"
+    ],
+    "search_names": [
+      "Construction & Engineering"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861011",
+    "english_name": "Electrical Equipment",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Electrical Equipment"
+    ],
+    "search_names": [
+      "Electrical Equipment"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861012",
+    "english_name": "Industrial Conglomerates",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Industrial Conglomerates"
+    ],
+    "search_names": [
+      "Industrial Conglomerates"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861013",
+    "english_name": "Machinery",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Machinery"
+    ],
+    "search_names": [
+      "Machinery"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861014",
+    "english_name": "Trading Companies & Distributors",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Trading Companies & Distributors"
+    ],
+    "search_names": [
+      "Trading Companies & Distributors"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861015",
+    "english_name": "Commercial Services & Supplies",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Commercial & Professional Services",
+      "Commercial Services & Supplies"
+    ],
+    "search_names": [
+      "Commercial Services & Supplies"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861016",
+    "english_name": "Professional Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Commercial & Professional Services",
+      "Professional Services"
+    ],
+    "search_names": [
+      "Professional Services"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861017",
+    "english_name": "Air Freight & Logistics",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation",
+      "Air Freight & Logistics"
+    ],
+    "search_names": [
+      "Air Freight & Logistics"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861018",
+    "english_name": "Airlines",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation",
+      "Airlines"
+    ],
+    "search_names": [
+      "Airlines"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861019",
+    "english_name": "Marine",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation",
+      "Marine"
+    ],
+    "search_names": [
+      "Marine"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861020",
+    "english_name": "Road & Rail",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation",
+      "Road & Rail"
+    ],
+    "search_names": [
+      "Road & Rail"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861021",
+    "english_name": "Transportation Infrastructure",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation",
+      "Transportation Infrastructure"
+    ],
+    "search_names": [
+      "Transportation Infrastructure"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861022",
+    "english_name": "Auto Components",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Automobiles & Components",
+      "Auto Components"
+    ],
+    "search_names": [
+      "Auto Components"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861023",
+    "english_name": "Automobiles",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Automobiles & Components",
+      "Automobiles"
+    ],
+    "search_names": [
+      "Automobiles"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861024",
+    "english_name": "Household Durables",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Durables & Apparel",
+      "Household Durables"
+    ],
+    "search_names": [
+      "Household Durables"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861025",
+    "english_name": "Leisure Products",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Durables & Apparel",
+      "Leisure Products"
+    ],
+    "search_names": [
+      "Leisure Products"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861026",
+    "english_name": "Textiles, Apparel & Luxury Goods",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Durables & Apparel",
+      "Textiles, Apparel & Luxury Goods"
+    ],
+    "search_names": [
+      "Textiles, Apparel & Luxury Goods"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861027",
+    "english_name": "Hotels, Restaurants & Leisure",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Services",
+      "Hotels, Restaurants & Leisure"
+    ],
+    "search_names": [
+      "Hotels, Restaurants & Leisure"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861028",
+    "english_name": "Diversified Consumer Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Services",
+      "Diversified Consumer Services"
+    ],
+    "search_names": [
+      "Diversified Consumer Services"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861029",
+    "english_name": "Distributors",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Discretionary Distribution & Retail",
+      "Distributors"
+    ],
+    "search_names": [
+      "Distributors"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861031",
+    "english_name": "Multiline Retail",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Discretionary Distribution & Retail",
+      "Multiline Retail"
+    ],
+    "search_names": [
+      "Multiline Retail"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861032",
+    "english_name": "Specialty Retail",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Discretionary Distribution & Retail",
+      "Specialty Retail"
+    ],
+    "search_names": [
+      "Specialty Retail"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861033",
+    "english_name": "Food & Staples Retailing",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Consumer Staples Distribution & Retail",
+      "Food & Staples Retailing"
+    ],
+    "search_names": [
+      "Food & Staples Retailing"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861034",
+    "english_name": "Beverages",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Food, Beverage & Tobacco",
+      "Beverages"
+    ],
+    "search_names": [
+      "Beverages"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861035",
+    "english_name": "Food Products",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Food, Beverage & Tobacco",
+      "Food Products"
+    ],
+    "search_names": [
+      "Food Products"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861036",
+    "english_name": "Tobacco",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Food, Beverage & Tobacco",
+      "Tobacco"
+    ],
+    "search_names": [
+      "Tobacco"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861037",
+    "english_name": "Household Products",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Household & Personal Products",
+      "Household Products"
+    ],
+    "search_names": [
+      "Household Products"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861038",
+    "english_name": "Personal Products",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Household & Personal Products",
+      "Personal Products"
+    ],
+    "search_names": [
+      "Personal Products"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861039",
+    "english_name": "Health Care Equipment & Supplies",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Health Care Equipment & Services",
+      "Health Care Equipment & Supplies"
+    ],
+    "search_names": [
+      "Health Care Equipment & Supplies"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861040",
+    "english_name": "Health Care Providers & Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Health Care Equipment & Services",
+      "Health Care Providers & Services"
+    ],
+    "search_names": [
+      "Health Care Providers & Services"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861041",
+    "english_name": "Health Care Technology",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Health Care Equipment & Services",
+      "Health Care Technology"
+    ],
+    "search_names": [
+      "Health Care Technology"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861042",
+    "english_name": "Biotechnology",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Pharmaceuticals, Biotechnology & Life Sciences",
+      "Biotechnology"
+    ],
+    "search_names": [
+      "Biotechnology"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861043",
+    "english_name": "Pharmaceuticals",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Pharmaceuticals, Biotechnology & Life Sciences",
+      "Pharmaceuticals"
+    ],
+    "search_names": [
+      "Pharmaceuticals"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861044",
+    "english_name": "Life Sciences Tools & Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Pharmaceuticals, Biotechnology & Life Sciences",
+      "Life Sciences Tools & Services"
+    ],
+    "search_names": [
+      "Life Sciences Tools & Services"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861045",
+    "english_name": "Banks",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Banks",
+      "Banks"
+    ],
+    "search_names": [
+      "Banks"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861047",
+    "english_name": "Diversified Financial Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Diversified Financial Services"
+    ],
+    "search_names": [
+      "Diversified Financial Services"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861048",
+    "english_name": "Consumer Finance",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Consumer Finance"
+    ],
+    "search_names": [
+      "Consumer Finance"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861049",
+    "english_name": "Capital Markets",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Capital Markets"
+    ],
+    "search_names": [
+      "Capital Markets"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861050",
+    "english_name": "Mortgage Real Estate Investment Trusts (REITs)",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Mortgage Real Estate Investment Trusts (REITs)"
+    ],
+    "search_names": [
+      "Mortgage Real Estate Investment Trusts (REITs)"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861051",
+    "english_name": "Insurance",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Insurance",
+      "Insurance"
+    ],
+    "search_names": [
+      "Insurance"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861052",
+    "english_name": "IT Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Software & Services",
+      "IT Services"
+    ],
+    "search_names": [
+      "IT Services"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861053",
+    "english_name": "Software",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Software & Services",
+      "Software"
+    ],
+    "search_names": [
+      "Software"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861054",
+    "english_name": "Communications Equipment",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Technology Hardware & Equipment",
+      "Communications Equipment"
+    ],
+    "search_names": [
+      "Communications Equipment"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861055",
+    "english_name": "Technology Hardware, Storage & Peripherals",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Technology Hardware & Equipment",
+      "Technology Hardware, Storage & Peripherals"
+    ],
+    "search_names": [
+      "Technology Hardware, Storage & Peripherals"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861056",
+    "english_name": "Electronic Equipment, Instruments & Components",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Technology Hardware & Equipment",
+      "Electronic Equipment, Instruments & Components"
+    ],
+    "search_names": [
+      "Electronic Equipment, Instruments & Components"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861057",
+    "english_name": "Semiconductors & Semiconductor Equipment",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Semiconductors & Semiconductor Equipment",
+      "Semiconductors & Semiconductor Equipment"
+    ],
+    "search_names": [
+      "Semiconductors & Semiconductor Equipment"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861058",
+    "english_name": "Diversified Telecommunication Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Telecommunication Services",
+      "Diversified Telecommunication Services"
+    ],
+    "search_names": [
+      "Diversified Telecommunication Services"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861059",
+    "english_name": "Wireless Telecommunication Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Telecommunication Services",
+      "Wireless Telecommunication Services"
+    ],
+    "search_names": [
+      "Wireless Telecommunication Services"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861060",
+    "english_name": "Media",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Media & Entertainment",
+      "Media"
+    ],
+    "search_names": [
+      "Media"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861061",
+    "english_name": "Entertainment",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Media & Entertainment",
+      "Entertainment"
+    ],
+    "search_names": [
+      "Entertainment"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861062",
+    "english_name": "Interactive Media & Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Media & Entertainment",
+      "Interactive Media & Services"
+    ],
+    "search_names": [
+      "Interactive Media & Services"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861063",
+    "english_name": "Electric Utilities",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Utilities",
+      "Utilities",
+      "Electric Utilities"
+    ],
+    "search_names": [
+      "Electric Utilities"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861064",
+    "english_name": "Gas Utilities",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Utilities",
+      "Utilities",
+      "Gas Utilities"
+    ],
+    "search_names": [
+      "Gas Utilities"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861065",
+    "english_name": "Multi-Utilities",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Utilities",
+      "Utilities",
+      "Multi-Utilities"
+    ],
+    "search_names": [
+      "Multi-Utilities"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861066",
+    "english_name": "Water Utilities",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Utilities",
+      "Utilities",
+      "Water Utilities"
+    ],
+    "search_names": [
+      "Water Utilities"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861067",
+    "english_name": "Independent Power and Renewable Electricity Producers",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Utilities",
+      "Utilities",
+      "Independent Power and Renewable Electricity Producers"
+    ],
+    "search_names": [
+      "Independent Power and Renewable Electricity Producers"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861068",
+    "english_name": "Equity Real Estate Investment Trusts(REITs)",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Equity Real Estate Investment Trusts(REITs)"
+    ],
+    "search_names": [
+      "Equity Real Estate Investment Trusts(REITs)"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861264",
+    "english_name": "Industrial REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Industrial REITs"
+    ],
+    "search_names": [
+      "Industrial REITs"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861265",
+    "english_name": "Hotel & Resort REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Hotel & Resort REITs"
+    ],
+    "search_names": [
+      "Hotel & Resort REITs"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861266",
+    "english_name": "Office REIT",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Office REIT"
+    ],
+    "search_names": [
+      "Office REIT"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861267",
+    "english_name": "Health Care REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Health Care REITs"
+    ],
+    "search_names": [
+      "Health Care REITs"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861268",
+    "english_name": "Residential REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Residential REITs"
+    ],
+    "search_names": [
+      "Residential REITs"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861269",
+    "english_name": "Retail REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Retail REITs"
+    ],
+    "search_names": [
+      "Retail REITs"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861270",
+    "english_name": "Specialized REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Specialized REITs"
+    ],
+    "search_names": [
+      "Specialized REITs"
+    ]
+  },
+  {
+    "level": 3,
+    "market_code": "89:861271",
+    "english_name": "Real Estate Management & Development",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Real Estate Management & Development",
+      "Real Estate Management & Development"
+    ],
+    "search_names": [
+      "Real Estate Management & Development"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861105",
+    "english_name": "Oil & Gas Drilling",
+    "chinese_aliases": [
+      "油气",
+      "油气钻井",
+      "石油",
+      "石油和天然气",
+      "石油和天然气行业",
+      "石油和天然气钻井",
+      "石油天然气",
+      "石油行业",
+      "石油钻井"
+    ],
+    "english_aliases": [
+      "oilandgas"
+    ],
+    "path_en": [
+      "Overseas GICS industry",
+      "Energy",
+      "Energy",
+      "Energy Equipment & Services",
+      "Oil & Gas Drilling"
+    ],
+    "search_names": [
+      "Oil & Gas Drilling",
+      "oilandgas",
+      "油气",
+      "油气钻井",
+      "石油",
+      "石油和天然气",
+      "石油和天然气行业",
+      "石油和天然气钻井",
+      "石油天然气",
+      "石油行业",
+      "石油钻井"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861106",
+    "english_name": "Oil and Gas Equipment and Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Energy",
+      "Energy",
+      "Energy Equipment & Services",
+      "Oil and Gas Equipment and Services"
+    ],
+    "search_names": [
+      "Oil and Gas Equipment and Services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861107",
+    "english_name": "Integrated Oil & Gas",
+    "chinese_aliases": [
+      "综合性石油和天然气",
+      "综合性石油天然气"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Energy",
+      "Energy",
+      "Oil, Gas & Consumable Fuels",
+      "Integrated Oil & Gas"
+    ],
+    "search_names": [
+      "Integrated Oil & Gas",
+      "综合性石油和天然气",
+      "综合性石油天然气"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861108",
+    "english_name": "Oil and gas exploration and production",
+    "chinese_aliases": [
+      "油气勘探开发",
+      "石油和天然气勘探开发",
+      "石油天然气勘探开发"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Energy",
+      "Energy",
+      "Oil, Gas & Consumable Fuels",
+      "Oil and gas exploration and production"
+    ],
+    "search_names": [
+      "Oil and gas exploration and production",
+      "油气勘探开发",
+      "石油和天然气勘探开发",
+      "石油天然气勘探开发"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861109",
+    "english_name": "Oil and gas refining and marketing",
+    "chinese_aliases": [
+      "油气炼化销售",
+      "石油和天然气炼化销售",
+      "石油天然气炼化销售"
+    ],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Energy",
+      "Energy",
+      "Oil, Gas & Consumable Fuels",
+      "Oil and gas refining and marketing"
+    ],
+    "search_names": [
+      "Oil and gas refining and marketing",
+      "油气炼化销售",
+      "石油和天然气炼化销售",
+      "石油天然气炼化销售"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861110",
+    "english_name": "Oil and gas storage and transportation",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Energy",
+      "Energy",
+      "Oil, Gas & Consumable Fuels",
+      "Oil and gas storage and transportation"
+    ],
+    "search_names": [
+      "Oil and gas storage and transportation"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861111",
+    "english_name": "Coal & Consumable Fuels",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Energy",
+      "Energy",
+      "Oil, Gas & Consumable Fuels",
+      "Coal & Consumable Fuels"
+    ],
+    "search_names": [
+      "Coal & Consumable Fuels"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861112",
+    "english_name": "Commodity Chemicals",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Chemicals",
+      "Commodity Chemicals"
+    ],
+    "search_names": [
+      "Commodity Chemicals"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861113",
+    "english_name": "Diversified Chemicals",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Chemicals",
+      "Diversified Chemicals"
+    ],
+    "search_names": [
+      "Diversified Chemicals"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861114",
+    "english_name": "Fertilizers and Agrochemicals",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Chemicals",
+      "Fertilizers and Agrochemicals"
+    ],
+    "search_names": [
+      "Fertilizers and Agrochemicals"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861115",
+    "english_name": "Industrial Gases",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Chemicals",
+      "Industrial Gases"
+    ],
+    "search_names": [
+      "Industrial Gases"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861116",
+    "english_name": "Specialty Chemicals",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Chemicals",
+      "Specialty Chemicals"
+    ],
+    "search_names": [
+      "Specialty Chemicals"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861117",
+    "english_name": "Construction Materials",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Construction Materials",
+      "Construction Materials"
+    ],
+    "search_names": [
+      "Construction Materials"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861118",
+    "english_name": "Metal & Glass Containers",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Containers & Packaging",
+      "Metal & Glass Containers"
+    ],
+    "search_names": [
+      "Metal & Glass Containers"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861119",
+    "english_name": "Paper Packaging",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Containers & Packaging",
+      "Paper Packaging"
+    ],
+    "search_names": [
+      "Paper Packaging"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861120",
+    "english_name": "Aluminum",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Metals & Mining",
+      "Aluminum"
+    ],
+    "search_names": [
+      "Aluminum"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861121",
+    "english_name": "Various Metals and Mining",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Metals & Mining",
+      "Various Metals and Mining"
+    ],
+    "search_names": [
+      "Various Metals and Mining"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861122",
+    "english_name": "Copper",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Metals & Mining",
+      "Copper"
+    ],
+    "search_names": [
+      "Copper"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861123",
+    "english_name": "Gold",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Metals & Mining",
+      "Gold"
+    ],
+    "search_names": [
+      "Gold"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861124",
+    "english_name": "Precious Metals & Minerals",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Metals & Mining",
+      "Precious Metals & Minerals"
+    ],
+    "search_names": [
+      "Precious Metals & Minerals"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861125",
+    "english_name": "Silver",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Metals & Mining",
+      "Silver"
+    ],
+    "search_names": [
+      "Silver"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861126",
+    "english_name": "Steel",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Metals & Mining",
+      "Steel"
+    ],
+    "search_names": [
+      "Steel"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861127",
+    "english_name": "Forest Products",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Paper & Forest Products",
+      "Forest Products"
+    ],
+    "search_names": [
+      "Forest Products"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861128",
+    "english_name": "Paper Products",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Materials",
+      "Materials",
+      "Paper & Forest Products",
+      "Paper Products"
+    ],
+    "search_names": [
+      "Paper Products"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861129",
+    "english_name": "Aerospace and Defense",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Aerospace & Defense",
+      "Aerospace and Defense"
+    ],
+    "search_names": [
+      "Aerospace and Defense"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861130",
+    "english_name": "Building products",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Building Products",
+      "Building products"
+    ],
+    "search_names": [
+      "Building products"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861131",
+    "english_name": "Construction & Engineering",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Construction & Engineering",
+      "Construction & Engineering"
+    ],
+    "search_names": [
+      "Construction & Engineering"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861132",
+    "english_name": "Electrical Components and Equipment",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Electrical Equipment",
+      "Electrical Components and Equipment"
+    ],
+    "search_names": [
+      "Electrical Components and Equipment"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861133",
+    "english_name": "Heavy Electrical Equipment",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Electrical Equipment",
+      "Heavy Electrical Equipment"
+    ],
+    "search_names": [
+      "Heavy Electrical Equipment"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861134",
+    "english_name": "Industrial Conglomerates",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Industrial Conglomerates",
+      "Industrial Conglomerates"
+    ],
+    "search_names": [
+      "Industrial Conglomerates"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861135",
+    "english_name": "Construction machinery and heavy transport equipment",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Machinery",
+      "Construction machinery and heavy transport equipment"
+    ],
+    "search_names": [
+      "Construction machinery and heavy transport equipment"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861136",
+    "english_name": "Agricultural & Farm Machinery",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Machinery",
+      "Agricultural & Farm Machinery"
+    ],
+    "search_names": [
+      "Agricultural & Farm Machinery"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861137",
+    "english_name": "Industrial machinery and supplies and parts",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Machinery",
+      "Industrial machinery and supplies and parts"
+    ],
+    "search_names": [
+      "Industrial machinery and supplies and parts"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861138",
+    "english_name": "Trading companies and distributors",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Capital Goods",
+      "Trading Companies & Distributors",
+      "Trading companies and distributors"
+    ],
+    "search_names": [
+      "Trading companies and distributors"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861139",
+    "english_name": "Commercial Printing",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Commercial & Professional Services",
+      "Commercial Services & Supplies",
+      "Commercial Printing"
+    ],
+    "search_names": [
+      "Commercial Printing"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861140",
+    "english_name": "Environment and Facilities Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Commercial & Professional Services",
+      "Commercial Services & Supplies",
+      "Environment and Facilities Services"
+    ],
+    "search_names": [
+      "Environment and Facilities Services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861141",
+    "english_name": "Office Services & Supplies",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Commercial & Professional Services",
+      "Commercial Services & Supplies",
+      "Office Services & Supplies"
+    ],
+    "search_names": [
+      "Office Services & Supplies"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861142",
+    "english_name": "Comprehensive support services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Commercial & Professional Services",
+      "Commercial Services & Supplies",
+      "Comprehensive support services"
+    ],
+    "search_names": [
+      "Comprehensive support services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861143",
+    "english_name": "Security and Alarm Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Commercial & Professional Services",
+      "Commercial Services & Supplies",
+      "Security and Alarm Services"
+    ],
+    "search_names": [
+      "Security and Alarm Services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861144",
+    "english_name": "Human Resources and Employment Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Commercial & Professional Services",
+      "Professional Services",
+      "Human Resources and Employment Services"
+    ],
+    "search_names": [
+      "Human Resources and Employment Services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861145",
+    "english_name": "Investigation and advisory services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Commercial & Professional Services",
+      "Professional Services",
+      "Investigation and advisory services"
+    ],
+    "search_names": [
+      "Investigation and advisory services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861146",
+    "english_name": "Air Freight & Logistics",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation",
+      "Air Freight & Logistics",
+      "Air Freight & Logistics"
+    ],
+    "search_names": [
+      "Air Freight & Logistics"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861147",
+    "english_name": "Airlines",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation",
+      "Airlines",
+      "Airlines"
+    ],
+    "search_names": [
+      "Airlines"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861148",
+    "english_name": "Sea transport",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation",
+      "Marine",
+      "Sea transport"
+    ],
+    "search_names": [
+      "Sea transport"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861149",
+    "english_name": "Rail transport",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation",
+      "Road & Rail",
+      "Rail transport"
+    ],
+    "search_names": [
+      "Rail transport"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861151",
+    "english_name": "Airport Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation",
+      "Transportation Infrastructure",
+      "Airport Services"
+    ],
+    "search_names": [
+      "Airport Services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861152",
+    "english_name": "Highways & Railtracks",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation",
+      "Transportation Infrastructure",
+      "Highways & Railtracks"
+    ],
+    "search_names": [
+      "Highways & Railtracks"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861154",
+    "english_name": "Auto parts and equipment",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Automobiles & Components",
+      "Auto Components",
+      "Auto parts and equipment"
+    ],
+    "search_names": [
+      "Auto parts and equipment"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861155",
+    "english_name": "Tires & Rubber",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Automobiles & Components",
+      "Auto Components",
+      "Tires & Rubber"
+    ],
+    "search_names": [
+      "Tires & Rubber"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861156",
+    "english_name": "Car manufacturer",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Automobiles & Components",
+      "Automobiles",
+      "Car manufacturer"
+    ],
+    "search_names": [
+      "Car manufacturer"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861157",
+    "english_name": "Motorcycle manufacturer",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Automobiles & Components",
+      "Automobiles",
+      "Motorcycle manufacturer"
+    ],
+    "search_names": [
+      "Motorcycle manufacturer"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861158",
+    "english_name": "Consumer Electronics",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Durables & Apparel",
+      "Household Durables",
+      "Consumer Electronics"
+    ],
+    "search_names": [
+      "Consumer Electronics"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861159",
+    "english_name": "Home decoration",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Durables & Apparel",
+      "Household Durables",
+      "Home decoration"
+    ],
+    "search_names": [
+      "Home decoration"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861160",
+    "english_name": "Residential building",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Durables & Apparel",
+      "Household Durables",
+      "Residential building"
+    ],
+    "search_names": [
+      "Residential building"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861161",
+    "english_name": "Household Appliances",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Durables & Apparel",
+      "Household Durables",
+      "Household Appliances"
+    ],
+    "search_names": [
+      "Household Appliances"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861162",
+    "english_name": "Housewares & Specialties",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Durables & Apparel",
+      "Household Durables",
+      "Housewares & Specialties"
+    ],
+    "search_names": [
+      "Housewares & Specialties"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861163",
+    "english_name": "Leisure Goods",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Durables & Apparel",
+      "Leisure Products",
+      "Leisure Goods"
+    ],
+    "search_names": [
+      "Leisure Goods"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861164",
+    "english_name": "Apparel, Apparel and Luxury Goods",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Durables & Apparel",
+      "Textiles, Apparel & Luxury Goods",
+      "Apparel, Apparel and Luxury Goods"
+    ],
+    "search_names": [
+      "Apparel, Apparel and Luxury Goods"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861165",
+    "english_name": "Footwear",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Durables & Apparel",
+      "Textiles, Apparel & Luxury Goods",
+      "Footwear"
+    ],
+    "search_names": [
+      "Footwear"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861166",
+    "english_name": "Textiles",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Durables & Apparel",
+      "Textiles, Apparel & Luxury Goods",
+      "Textiles"
+    ],
+    "search_names": [
+      "Textiles"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861167",
+    "english_name": "Casino and Gambling",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Services",
+      "Hotels, Restaurants & Leisure",
+      "Casino and Gambling"
+    ],
+    "search_names": [
+      "Casino and Gambling"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861168",
+    "english_name": "Hotels, Resorts and Luxury Cruises",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Services",
+      "Hotels, Restaurants & Leisure",
+      "Hotels, Resorts and Luxury Cruises"
+    ],
+    "search_names": [
+      "Hotels, Resorts and Luxury Cruises"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861169",
+    "english_name": "Leisure facilities",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Services",
+      "Hotels, Restaurants & Leisure",
+      "Leisure facilities"
+    ],
+    "search_names": [
+      "Leisure facilities"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861170",
+    "english_name": "Restaurants",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Services",
+      "Hotels, Restaurants & Leisure",
+      "Restaurants"
+    ],
+    "search_names": [
+      "Restaurants"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861171",
+    "english_name": "Educational Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Services",
+      "Diversified Consumer Services",
+      "Educational Services"
+    ],
+    "search_names": [
+      "Educational Services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861172",
+    "english_name": "Specialized Consumer Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Services",
+      "Diversified Consumer Services",
+      "Specialized Consumer Services"
+    ],
+    "search_names": [
+      "Specialized Consumer Services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861173",
+    "english_name": "Dealer",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Discretionary Distribution & Retail",
+      "Distributors",
+      "Dealer"
+    ],
+    "search_names": [
+      "Dealer"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861177",
+    "english_name": "Clothing retail",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Discretionary Distribution & Retail",
+      "Specialty Retail",
+      "Clothing retail"
+    ],
+    "search_names": [
+      "Clothing retail"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861178",
+    "english_name": "Computer & Electronics Retail",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Discretionary Distribution & Retail",
+      "Specialty Retail",
+      "Computer & Electronics Retail"
+    ],
+    "search_names": [
+      "Computer & Electronics Retail"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861179",
+    "english_name": "Home Interior Decoration Retail",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Discretionary Distribution & Retail",
+      "Specialty Retail",
+      "Home Interior Decoration Retail"
+    ],
+    "search_names": [
+      "Home Interior Decoration Retail"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861180",
+    "english_name": "Specialty Stores",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Discretionary Distribution & Retail",
+      "Specialty Retail",
+      "Specialty Stores"
+    ],
+    "search_names": [
+      "Specialty Stores"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861181",
+    "english_name": "Automotive Retail",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Discretionary Distribution & Retail",
+      "Specialty Retail",
+      "Automotive Retail"
+    ],
+    "search_names": [
+      "Automotive Retail"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861182",
+    "english_name": "Home Decoration Retail",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Discretionary Distribution & Retail",
+      "Specialty Retail",
+      "Home Decoration Retail"
+    ],
+    "search_names": [
+      "Home Decoration Retail"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861183",
+    "english_name": "Drug Retail",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Consumer Staples Distribution & Retail",
+      "Food & Staples Retailing",
+      "Drug Retail"
+    ],
+    "search_names": [
+      "Drug Retail"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861184",
+    "english_name": "Food Distributors",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Consumer Staples Distribution & Retail",
+      "Food & Staples Retailing",
+      "Food Distributors"
+    ],
+    "search_names": [
+      "Food Distributors"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861185",
+    "english_name": "Food retail",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Consumer Staples Distribution & Retail",
+      "Food & Staples Retailing",
+      "Food retail"
+    ],
+    "search_names": [
+      "Food retail"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861186",
+    "english_name": "Consumer goods retail",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Consumer Staples Distribution & Retail",
+      "Food & Staples Retailing",
+      "Consumer goods retail"
+    ],
+    "search_names": [
+      "Consumer goods retail"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861187",
+    "english_name": "Brewers",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Food, Beverage & Tobacco",
+      "Beverages",
+      "Brewers"
+    ],
+    "search_names": [
+      "Brewers"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861188",
+    "english_name": "Winemakers and vintners",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Food, Beverage & Tobacco",
+      "Beverages",
+      "Winemakers and vintners"
+    ],
+    "search_names": [
+      "Winemakers and vintners"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861189",
+    "english_name": "Soft drinks and non-alcoholic drinks",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Food, Beverage & Tobacco",
+      "Beverages",
+      "Soft drinks and non-alcoholic drinks"
+    ],
+    "search_names": [
+      "Soft drinks and non-alcoholic drinks"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861190",
+    "english_name": "Agricultural Products and Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Food, Beverage & Tobacco",
+      "Food Products",
+      "Agricultural Products and Services"
+    ],
+    "search_names": [
+      "Agricultural Products and Services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861191",
+    "english_name": "Packaged Foods & Meats",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Food, Beverage & Tobacco",
+      "Food Products",
+      "Packaged Foods & Meats"
+    ],
+    "search_names": [
+      "Packaged Foods & Meats"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861192",
+    "english_name": "Tobacco",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Food, Beverage & Tobacco",
+      "Tobacco",
+      "Tobacco"
+    ],
+    "search_names": [
+      "Tobacco"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861193",
+    "english_name": "Household Products",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Household & Personal Products",
+      "Household Products",
+      "Household Products"
+    ],
+    "search_names": [
+      "Household Products"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861194",
+    "english_name": "Personal care products",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Staples",
+      "Household & Personal Products",
+      "Personal Products",
+      "Personal care products"
+    ],
+    "search_names": [
+      "Personal care products"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861195",
+    "english_name": "Healthcare Equipment",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Health Care Equipment & Services",
+      "Health Care Equipment & Supplies",
+      "Healthcare Equipment"
+    ],
+    "search_names": [
+      "Healthcare Equipment"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861196",
+    "english_name": "Healthcare Supplies",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Health Care Equipment & Services",
+      "Health Care Equipment & Supplies",
+      "Healthcare Supplies"
+    ],
+    "search_names": [
+      "Healthcare Supplies"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861197",
+    "english_name": "Health Care Distributors",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Health Care Equipment & Services",
+      "Health Care Providers & Services",
+      "Health Care Distributors"
+    ],
+    "search_names": [
+      "Health Care Distributors"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861198",
+    "english_name": "Health care services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Health Care Equipment & Services",
+      "Health Care Providers & Services",
+      "Health care services"
+    ],
+    "search_names": [
+      "Health care services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861199",
+    "english_name": "Health care institution",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Health Care Equipment & Services",
+      "Health Care Providers & Services",
+      "Health care institution"
+    ],
+    "search_names": [
+      "Health care institution"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861200",
+    "english_name": "Managed Health Care",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Health Care Equipment & Services",
+      "Health Care Providers & Services",
+      "Managed Health Care"
+    ],
+    "search_names": [
+      "Managed Health Care"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861201",
+    "english_name": "Healthcare Technology",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Health Care Equipment & Services",
+      "Health Care Technology",
+      "Healthcare Technology"
+    ],
+    "search_names": [
+      "Healthcare Technology"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861202",
+    "english_name": "Biological Technology",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Pharmaceuticals, Biotechnology & Life Sciences",
+      "Biotechnology",
+      "Biological Technology"
+    ],
+    "search_names": [
+      "Biological Technology"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861203",
+    "english_name": "Pharmaceutical",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Pharmaceuticals, Biotechnology & Life Sciences",
+      "Pharmaceuticals",
+      "Pharmaceutical"
+    ],
+    "search_names": [
+      "Pharmaceutical"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861204",
+    "english_name": "Life Science Tools and Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Health Care",
+      "Pharmaceuticals, Biotechnology & Life Sciences",
+      "Life Sciences Tools & Services",
+      "Life Science Tools and Services"
+    ],
+    "search_names": [
+      "Life Science Tools and Services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861205",
+    "english_name": "General Bank",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Banks",
+      "Banks",
+      "General Bank"
+    ],
+    "search_names": [
+      "General Bank"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861206",
+    "english_name": "Regional bank",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Banks",
+      "Banks",
+      "Regional bank"
+    ],
+    "search_names": [
+      "Regional bank"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861208",
+    "english_name": "Comprehensive financial services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Diversified Financial Services",
+      "Comprehensive financial services"
+    ],
+    "search_names": [
+      "Comprehensive financial services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861209",
+    "english_name": "Multi-domain holding",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Diversified Financial Services",
+      "Multi-domain holding"
+    ],
+    "search_names": [
+      "Multi-domain holding"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861210",
+    "english_name": "Special financial services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Diversified Financial Services",
+      "Special financial services"
+    ],
+    "search_names": [
+      "Special financial services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861211",
+    "english_name": "Consumer credit",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Consumer Finance",
+      "Consumer credit"
+    ],
+    "search_names": [
+      "Consumer credit"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861212",
+    "english_name": "Asset Management and Custody Banking",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Capital Markets",
+      "Asset Management and Custody Banking"
+    ],
+    "search_names": [
+      "Asset Management and Custody Banking"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861213",
+    "english_name": "Investment Banking and Brokerage",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Capital Markets",
+      "Investment Banking and Brokerage"
+    ],
+    "search_names": [
+      "Investment Banking and Brokerage"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861214",
+    "english_name": "Diversified Capital Markets",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Capital Markets",
+      "Diversified Capital Markets"
+    ],
+    "search_names": [
+      "Diversified Capital Markets"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861215",
+    "english_name": "Financial Exchanges & Data",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Capital Markets",
+      "Financial Exchanges & Data"
+    ],
+    "search_names": [
+      "Financial Exchanges & Data"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861216",
+    "english_name": "Mortgage Real Estate Investment Trust",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Mortgage Real Estate Investment Trusts (REITs)",
+      "Mortgage Real Estate Investment Trust"
+    ],
+    "search_names": [
+      "Mortgage Real Estate Investment Trust"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861217",
+    "english_name": "Insurance broker",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Insurance",
+      "Insurance",
+      "Insurance broker"
+    ],
+    "search_names": [
+      "Insurance broker"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861218",
+    "english_name": "Life & Health Insurance",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Insurance",
+      "Insurance",
+      "Life & Health Insurance"
+    ],
+    "search_names": [
+      "Life & Health Insurance"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861219",
+    "english_name": "Diversified Insurance",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Insurance",
+      "Insurance",
+      "Diversified Insurance"
+    ],
+    "search_names": [
+      "Diversified Insurance"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861220",
+    "english_name": "Property & Casualty Insurance",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Insurance",
+      "Insurance",
+      "Property & Casualty Insurance"
+    ],
+    "search_names": [
+      "Property & Casualty Insurance"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861221",
+    "english_name": "Reinsurance",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Insurance",
+      "Insurance",
+      "Reinsurance"
+    ],
+    "search_names": [
+      "Reinsurance"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861222",
+    "english_name": "Information Technology Consulting and Other Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Software & Services",
+      "IT Services",
+      "Information Technology Consulting and Other Services"
+    ],
+    "search_names": [
+      "Information Technology Consulting and Other Services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861224",
+    "english_name": "Internet services and infrastructure",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Software & Services",
+      "IT Services",
+      "Internet services and infrastructure"
+    ],
+    "search_names": [
+      "Internet services and infrastructure"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861225",
+    "english_name": "Application software",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Software & Services",
+      "Software",
+      "Application software"
+    ],
+    "search_names": [
+      "Application software"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861226",
+    "english_name": "System software",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Software & Services",
+      "Software",
+      "System software"
+    ],
+    "search_names": [
+      "System software"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861227",
+    "english_name": "Communication equipment",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Technology Hardware & Equipment",
+      "Communications Equipment",
+      "Communication equipment"
+    ],
+    "search_names": [
+      "Communication equipment"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861228",
+    "english_name": "Computer hardware, storage devices and computer peripherals",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Technology Hardware & Equipment",
+      "Technology Hardware, Storage & Peripherals",
+      "Computer hardware, storage devices and computer peripherals"
+    ],
+    "search_names": [
+      "Computer hardware, storage devices and computer peripherals"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861229",
+    "english_name": "Electronic equipment and instruments",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Technology Hardware & Equipment",
+      "Electronic Equipment, Instruments & Components",
+      "Electronic equipment and instruments"
+    ],
+    "search_names": [
+      "Electronic equipment and instruments"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861230",
+    "english_name": "Electronic components",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Technology Hardware & Equipment",
+      "Electronic Equipment, Instruments & Components",
+      "Electronic components"
+    ],
+    "search_names": [
+      "Electronic components"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861231",
+    "english_name": "Electronic Manufacturing Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Technology Hardware & Equipment",
+      "Electronic Equipment, Instruments & Components",
+      "Electronic Manufacturing Services"
+    ],
+    "search_names": [
+      "Electronic Manufacturing Services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861232",
+    "english_name": "Technical product distributor",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Technology Hardware & Equipment",
+      "Electronic Equipment, Instruments & Components",
+      "Technical product distributor"
+    ],
+    "search_names": [
+      "Technical product distributor"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861233",
+    "english_name": "Semiconductor materials and equipment",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Semiconductors & Semiconductor Equipment",
+      "Semiconductors & Semiconductor Equipment",
+      "Semiconductor materials and equipment"
+    ],
+    "search_names": [
+      "Semiconductor materials and equipment"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861234",
+    "english_name": "Semiconductor products",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Information Technology",
+      "Semiconductors & Semiconductor Equipment",
+      "Semiconductors & Semiconductor Equipment",
+      "Semiconductor products"
+    ],
+    "search_names": [
+      "Semiconductor products"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861235",
+    "english_name": "Alternative Carriers",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Telecommunication Services",
+      "Diversified Telecommunication Services",
+      "Alternative Carriers"
+    ],
+    "search_names": [
+      "Alternative Carriers"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861236",
+    "english_name": "Integrated telecommunications services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Telecommunication Services",
+      "Diversified Telecommunication Services",
+      "Integrated telecommunications services"
+    ],
+    "search_names": [
+      "Integrated telecommunications services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861237",
+    "english_name": "Wireless telecommunications business",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Telecommunication Services",
+      "Wireless Telecommunication Services",
+      "Wireless telecommunications business"
+    ],
+    "search_names": [
+      "Wireless telecommunications business"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861238",
+    "english_name": "Advertising",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Media & Entertainment",
+      "Media",
+      "Advertising"
+    ],
+    "search_names": [
+      "Advertising"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861239",
+    "english_name": "Broadcast",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Media & Entertainment",
+      "Media",
+      "Broadcast"
+    ],
+    "search_names": [
+      "Broadcast"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861240",
+    "english_name": "Cable and Satellite TV",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Media & Entertainment",
+      "Media",
+      "Cable and Satellite TV"
+    ],
+    "search_names": [
+      "Cable and Satellite TV"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861241",
+    "english_name": "Publishing",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Media & Entertainment",
+      "Media",
+      "Publishing"
+    ],
+    "search_names": [
+      "Publishing"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861242",
+    "english_name": "Movies & Entertainment",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Media & Entertainment",
+      "Entertainment",
+      "Movies & Entertainment"
+    ],
+    "search_names": [
+      "Movies & Entertainment"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861243",
+    "english_name": "Interactive Home Entertainment",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Media & Entertainment",
+      "Entertainment",
+      "Interactive Home Entertainment"
+    ],
+    "search_names": [
+      "Interactive Home Entertainment"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861244",
+    "english_name": "Interactive Media and Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Communication Services",
+      "Media & Entertainment",
+      "Interactive Media & Services",
+      "Interactive Media and Services"
+    ],
+    "search_names": [
+      "Interactive Media and Services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861245",
+    "english_name": "Electric Utilities",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Utilities",
+      "Utilities",
+      "Electric Utilities",
+      "Electric Utilities"
+    ],
+    "search_names": [
+      "Electric Utilities"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861246",
+    "english_name": "Gas Utilities",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Utilities",
+      "Utilities",
+      "Gas Utilities",
+      "Gas Utilities"
+    ],
+    "search_names": [
+      "Gas Utilities"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861247",
+    "english_name": "Multi-Utilities",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Utilities",
+      "Utilities",
+      "Multi-Utilities",
+      "Multi-Utilities"
+    ],
+    "search_names": [
+      "Multi-Utilities"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861248",
+    "english_name": "Water Utilities",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Utilities",
+      "Utilities",
+      "Water Utilities",
+      "Water Utilities"
+    ],
+    "search_names": [
+      "Water Utilities"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861249",
+    "english_name": "Independent Power Producers & Energy Traders",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Utilities",
+      "Utilities",
+      "Independent Power and Renewable Electricity Producers",
+      "Independent Power Producers & Energy Traders"
+    ],
+    "search_names": [
+      "Independent Power Producers & Energy Traders"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861250",
+    "english_name": "New energy power generation companies",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Utilities",
+      "Utilities",
+      "Independent Power and Renewable Electricity Producers",
+      "New energy power generation companies"
+    ],
+    "search_names": [
+      "New energy power generation companies"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861251",
+    "english_name": "Diversified REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Equity Real Estate Investment Trusts(REITs)",
+      "Diversified REITs"
+    ],
+    "search_names": [
+      "Diversified REITs"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861272",
+    "english_name": "Data processing and outsourcing services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Commercial & Professional Services",
+      "Professional Services",
+      "Data processing and outsourcing services"
+    ],
+    "search_names": [
+      "Data processing and outsourcing services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861273",
+    "english_name": "Ground freight",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation",
+      "Road & Rail",
+      "Ground freight"
+    ],
+    "search_names": [
+      "Ground freight"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861274",
+    "english_name": "Ground passenger transport",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Industrials",
+      "Transportation",
+      "Road & Rail",
+      "Ground passenger transport"
+    ],
+    "search_names": [
+      "Ground passenger transport"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861275",
+    "english_name": "Multi-category retail",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Consumer Discretionary",
+      "Consumer Discretionary Distribution & Retail",
+      "Multiline Retail",
+      "Multi-category retail"
+    ],
+    "search_names": [
+      "Multi-category retail"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861276",
+    "english_name": "Commercial & Residential Mortgage Finance",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Diversified Financial Services",
+      "Commercial & Residential Mortgage Finance"
+    ],
+    "search_names": [
+      "Commercial & Residential Mortgage Finance"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861277",
+    "english_name": "Transaction and Payment Processing Services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Financials",
+      "Financial Services",
+      "Diversified Financial Services",
+      "Transaction and Payment Processing Services"
+    ],
+    "search_names": [
+      "Transaction and Payment Processing Services"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861278",
+    "english_name": "Industrial REIT",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Industrial REITs",
+      "Industrial REIT"
+    ],
+    "search_names": [
+      "Industrial REIT"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861279",
+    "english_name": "Hotel & Resort REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Hotel & Resort REITs",
+      "Hotel & Resort REITs"
+    ],
+    "search_names": [
+      "Hotel & Resort REITs"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861280",
+    "english_name": "Office REIT",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Office REIT",
+      "Office REIT"
+    ],
+    "search_names": [
+      "Office REIT"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861281",
+    "english_name": "Healthcare REIT",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Health Care REITs",
+      "Healthcare REIT"
+    ],
+    "search_names": [
+      "Healthcare REIT"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861282",
+    "english_name": "Multi-Family Residential REIT",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Residential REITs",
+      "Multi-Family Residential REIT"
+    ],
+    "search_names": [
+      "Multi-Family Residential REIT"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861283",
+    "english_name": "Single-family residential REIT",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Residential REITs",
+      "Single-family residential REIT"
+    ],
+    "search_names": [
+      "Single-family residential REIT"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861284",
+    "english_name": "Retail REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Retail REITs",
+      "Retail REITs"
+    ],
+    "search_names": [
+      "Retail REITs"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861285",
+    "english_name": "Other Specialized REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Specialized REITs",
+      "Other Specialized REITs"
+    ],
+    "search_names": [
+      "Other Specialized REITs"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861286",
+    "english_name": "Self-Storage REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Specialized REITs",
+      "Self-Storage REITs"
+    ],
+    "search_names": [
+      "Self-Storage REITs"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861287",
+    "english_name": "Telecom Tower REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Specialized REITs",
+      "Telecom Tower REITs"
+    ],
+    "search_names": [
+      "Telecom Tower REITs"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861288",
+    "english_name": "Timber REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Specialized REITs",
+      "Timber REITs"
+    ],
+    "search_names": [
+      "Timber REITs"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861289",
+    "english_name": "Data Center REITs",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Equity Real Estate Investment Trusts (REITs)",
+      "Specialized REITs",
+      "Data Center REITs"
+    ],
+    "search_names": [
+      "Data Center REITs"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861290",
+    "english_name": "Diversified Real Estate Activities",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Real Estate Management & Development",
+      "Real Estate Management & Development",
+      "Diversified Real Estate Activities"
+    ],
+    "search_names": [
+      "Diversified Real Estate Activities"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861291",
+    "english_name": "Real Estate Operating Companies",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Real Estate Management & Development",
+      "Real Estate Management & Development",
+      "Real Estate Operating Companies"
+    ],
+    "search_names": [
+      "Real Estate Operating Companies"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861292",
+    "english_name": "Real Estate Development",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Real Estate Management & Development",
+      "Real Estate Management & Development",
+      "Real Estate Development"
+    ],
+    "search_names": [
+      "Real Estate Development"
+    ]
+  },
+  {
+    "level": 4,
+    "market_code": "89:861293",
+    "english_name": "Real estate services",
+    "chinese_aliases": [],
+    "english_aliases": [],
+    "path_en": [
+      "Overseas GICS industry",
+      "Real Estate",
+      "Real Estate Management & Development",
+      "Real Estate Management & Development",
+      "Real estate services"
+    ],
+    "search_names": [
+      "Real estate services"
+    ]
+  }
+]

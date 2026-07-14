@@ -1,0 +1,26 @@
+{
+  "symbol": [
+    {
+      "type": "macro_metric",
+      "value": ["USGDP", "CNGDP"]
+    }
+  ],
+  "indicator": [
+    {
+      "id": "macro_last",
+      "req_unique_id": "macro_last"
+    },
+    {
+      "id": "macro_unit",
+      "req_unique_id": "macro_unit"
+    },
+    {
+      "id": "macro_observation_period",
+      "req_unique_id": "macro_observation_period"
+    }
+  ],
+  "page": {
+    "begin": 0,
+    "count": 20
+  }
+}
