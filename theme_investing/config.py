@@ -42,6 +42,11 @@ def _load_env(env_path: Path | None = None) -> dict:
     return json.loads((env_path or ENV_PATH).read_text(encoding="utf-8"))
 
 
+def load_env(env_path: Path | None = None) -> dict:
+    """Public alias for reading the env.json config into a dict."""
+    return _load_env(env_path)
+
+
 def active_profile_name(env: dict, kind: str) -> str:
     selected = env.get("active_profiles", {})
     if isinstance(selected, dict) and selected.get(kind):
@@ -74,7 +79,7 @@ def load_llm_config(env: dict | None = None) -> LLMConfig:
         messages_path = profile.get("messages_path", "/v1/messages")
         models_path = profile.get("models_path", "/v1/models")
         return LLMConfig(
-            base_url=f"{base}{messages_path}",
+            base_url=base,
             api_key=profile.get("api_key", ""),
             model=profile.get("model", "claude-opus-4-8"),
             timeout=float(profile.get("timeout_seconds", 600)),

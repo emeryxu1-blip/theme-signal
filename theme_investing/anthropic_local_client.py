@@ -15,8 +15,13 @@ import anthropic
 class LocalClaudeClient:
     def __init__(self, cfg):
         self.cfg = cfg
+        # The local profile targets a LiteLLM proxy (ANTHROPIC_BASE_URL) that
+        # authenticates via `Authorization: Bearer <key>`. Passing api_key=
+        # would make the SDK send an `x-api-key` header, which the proxy
+        # rejects with 401 "No api key passed in"; auth_token sends Bearer.
         self.client = anthropic.Anthropic(
-            api_key=cfg.api_key,
+            auth_token=cfg.api_key,
+            base_url=cfg.base_url,
             timeout=cfg.timeout,
             max_retries=2,
         )

@@ -36,8 +36,11 @@ DEFAULTS = dict(
     relevance_batch=60,
     stock_shortlist=40,
     etf_shortlist=25,
-    kline_count=90,           # enough daily bars for a ~20-day PRE-event baseline
-    rvol_threshold=1.5,       # event-window peak RVOL required to be "volume-confirmed"
+    kline_count=90,           # enough daily bars for the PRE-event baseline window
+    baseline_lookback=20,     # pre-event bars used to compute the median volume baseline
+    min_history=5,            # minimum pre-event bars required before baseline is trusted
+    rvol_threshold=1.5,       # event-window peak RVOL that earns a "volume-confirmed" badge
+    relevance_floor=3,        # minimum ai_relevance to be eligible for normal selection
     benchmark="169:SPY",      # market benchmark for abnormal-return calculation
 )
 
@@ -65,6 +68,29 @@ def validate_input(payload: dict) -> dict:
 def _batched(seq, size):
     for i in range(0, len(seq), size):
         yield seq[i:i + size]
+
+
+_EXPOSURE_TYPES = {"direct", "enabler", "supply_chain", "beneficiary",
+                   "diversified", "unclear"}
+
+
+def _clamp_int(v, lo, hi, *, default):
+    try:
+        return max(lo, min(hi, int(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _clamp_float(v, lo, hi, *, default):
+    try:
+        return max(lo, min(hi, float(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _norm_exposure(v) -> str:
+    v = str(v or "").strip().lower()
+    return v if v in _EXPOSURE_TYPES else "unclear"
 
 
 class ThemeWorkflow:
@@ -103,17 +129,29 @@ class ThemeWorkflow:
             try:
                 arr = self.llm.chat_json(prompts.RELEVANCE_SYS, user)
             except (ValueError, RuntimeError) as exc:
-                _log(f"relevance batch failed ({exc}); scoring 0")
+                _log(f"relevance batch failed ({exc}); marking {len(batch)} candidates unresolved")
                 arr = []
             by_code = {str(o.get("market_code")): o for o in arr if isinstance(o, dict)}
             for r in batch:
-                o = by_code.get(r["code"], {})
+                o = by_code.get(r["code"])
+                if o is None:
+                    # Missing from the LLM reply: mark unresolved, do NOT treat a
+                    # transport/coverage gap as a confident "no exposure" verdict.
+                    scores[r["code"]] = {
+                        "ai_relevance": 1, "exposure_type": "unclear",
+                        "confidence": 0.0, "reason": "", "relevance_status": "missing",
+                    }
+                    continue
                 scores[r["code"]] = {
-                    "ai_relevance": int(o.get("ai_relevance", 1) or 1),
-                    "exposure_type": o.get("exposure_type", "unclear"),
-                    "confidence": float(o.get("confidence", 0.3) or 0.3),
-                    "reason": o.get("reason", ""),
+                    "ai_relevance": _clamp_int(o.get("ai_relevance"), 1, 5, default=1),
+                    "exposure_type": _norm_exposure(o.get("exposure_type")),
+                    "confidence": _clamp_float(o.get("confidence"), 0.0, 1.0, default=0.3),
+                    "reason": str(o.get("reason", ""))[:200],
+                    "relevance_status": "scored",
                 }
+        n_missing = sum(1 for v in scores.values() if v.get("relevance_status") == "missing")
+        if n_missing:
+            _log(f"relevance: {n_missing}/{len(scores)} candidates had no valid LLM row")
         return scores
 
     # -- stage 5 -------------------------------------------------------------
@@ -122,34 +160,57 @@ class ThemeWorkflow:
         klines = self.quotes.fetch_klines(codes, count=self.opts["kline_count"])
         for c in cands:
             feats = scoring.compute_kline_features(
-                klines.get(c["code"], []), ev_int, benchmark_return)
+                klines.get(c["code"], []), ev_int, benchmark_return,
+                baseline_lookback=self.opts["baseline_lookback"],
+                min_history=self.opts["min_history"],
+            )
             c.update(feats)
 
     # -- stage 6 -------------------------------------------------------------
     def select(self, cands: list[dict], top_n: int, kind: str) -> list[dict]:
         thr = self.opts["rvol_threshold"]
+        floor = self.opts["relevance_floor"]
         rvol_pct = scoring.percentiles([c.get("rvol_event") for c in cands])
         abret_pct = scoring.percentiles([c.get("abnormal_return") for c in cands])
         chg_pct = scoring.percentiles([c.get("chg_pct") for c in cands])
         for c, rv, ab, cg in zip(cands, rvol_pct, abret_pct, chg_pct):
             c["rvol_pct"], c["abret_pct"], c["chg_rank"] = rv, ab, cg
+            # Penalise a clearly negative event-window move so a name that fell
+            # after the event cannot ride relevance alone to the top.
+            chg = c.get("chg_pct")
+            c["neg_price_penalty"] = min(0.5, abs(chg) / 100.0) if (chg is not None and chg < 0) else 0.0
             c["composite"] = scoring.composite(
-                c["ai_relevance"], rv, ab, cg, c.get("quality", 1.0))
+                c["ai_relevance"], rv, ab, cg, c.get("quality", 1.0),
+                exposure_type=c.get("exposure_type", "unclear"),
+                confidence=c.get("confidence", 0.5),
+                neg_price_penalty=c["neg_price_penalty"],
+            )
+            # Volume confirmation is a BADGE, not a hard ranking tier.
             c["volume_confirmed"] = bool(
                 c.get("rvol_event") is not None and c["rvol_event"] >= thr)
 
-        # keep meaningful relevance; fall back only if too few
-        strong = [c for c in cands if c["ai_relevance"] >= 3]
-        pool = strong if len(strong) >= top_n else cands
+        # Relevance gate: only names at/above the floor are eligible. Fall back to
+        # the strongest-relevance names only if too few clear the gate, and log it.
+        eligible = [c for c in cands if c["ai_relevance"] >= floor]
+        if len(eligible) < top_n:
+            backfill = sorted((c for c in cands if c["ai_relevance"] < floor),
+                              key=lambda c: (c["ai_relevance"], c["composite"]), reverse=True)
+            need = top_n - len(eligible)
+            _log(f"{kind}: only {len(eligible)} names >= relevance {floor}; "
+                 f"backfilling {min(need, len(backfill))} lower-relevance names")
+            eligible = eligible + backfill[:need]
+
+        # Rank the full eligible pool by composite (relevance-led) — no
+        # confirmed-first concatenation that would let a weak name jump ahead.
         key = lambda c: (c["composite"], c["ai_relevance"], c["rvol_pct"],
                          c["abret_pct"], -c["rank"])
-        # volume-confirmed names first; unconfirmed only fill remaining slots
-        confirmed = sorted([c for c in pool if c["volume_confirmed"]], key=key, reverse=True)
-        rest = sorted([c for c in pool if not c["volume_confirmed"]], key=key, reverse=True)
-        chosen = (confirmed + rest)[:top_n]
+        chosen = sorted(eligible, key=key, reverse=True)[:top_n]
+        # Sort strictly by composite descending before calibration so display
+        # scores are guaranteed monotonic.
+        chosen.sort(key=lambda c: c["composite"], reverse=True)
         n_conf = sum(1 for c in chosen if c["volume_confirmed"])
         _log(f"{kind}: {n_conf}/{len(chosen)} volume-confirmed (event RVOL>={thr}); "
-             f"{len(confirmed)} of {len(pool)} candidates passed the gate")
+             f"{len(eligible)} eligible of {len(cands)} candidates")
 
         display = scoring.calibrate_scores([c["composite"] for c in chosen])
         for c, s in zip(chosen, display):
@@ -163,7 +224,8 @@ class ThemeWorkflow:
             "exposure_type": c["exposure_type"],
             "relevance": c["ai_relevance"],
             "event_to_today_change_pct": round(c["chg_pct"], 2) if c.get("chg_pct") is not None else None,
-            "relative_volume": round(c["rel_volume"], 2) if c.get("rel_volume") is not None else None,
+            "relative_volume": round(c["rvol_event"], 2) if c.get("rvol_event") is not None else None,
+            "volume_confirmed": c.get("volume_confirmed", False),
         } for c in chosen]
         user = prompts.NARRATIVE_USER.format(
             theme=inp["theme"], thesis=brief.get("thesis", ""), as_of=self.as_of,
@@ -198,6 +260,8 @@ class ThemeWorkflow:
                 "score": c["score"],
                 "score_components": {
                     "ai_relevance": c["ai_relevance"],
+                    "exposure_type": c.get("exposure_type", "unclear"),
+                    "confidence": round(c.get("confidence", 0.0), 2),
                     "rvol_event": (round(c["rvol_event"], 2)
                                    if c.get("rvol_event") is not None else None),
                     "volume_confirmed": c.get("volume_confirmed", False),
@@ -205,6 +269,7 @@ class ThemeWorkflow:
                                             if c.get("abnormal_return") is not None else None),
                     "event_to_today_change_pct": (round(c["chg_pct"], 2)
                                                   if c.get("chg_pct") is not None else None),
+                    "data_quality": round(c.get("quality", 1.0), 2),
                 },
                 "event_date": event_date,
             })

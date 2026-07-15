@@ -37,15 +37,57 @@ def test_kline_features_requires_baseline():
     assert f["quality"] < 1.0
 
 
+def test_kline_features_configurable_robust_rvol_and_missing_volume():
+    bars = [
+        {"close": 100, "volume": volume, "date_int": 20260700 + i}
+        for i, volume in enumerate((10, 11, 12, 13, 14), 1)
+    ] + [
+        {"close": 101, "volume": None, "date_int": 20260706},
+        {"close": 102, "volume": 10000, "date_int": 20260707},
+        {"close": 103, "volume": 24, "date_int": 20260708},
+    ]
+    f = scoring.compute_kline_features(
+        bars, 20260706, baseline_lookback=3, min_history=3)
+    # Only the trailing 12, 13, and 14 volumes establish the baseline.
+    assert f["baseline_n"] == 3
+    assert f["window_n"] == 2  # None volume is explicitly excluded.
+    assert f["rvol_event"] == scoring.RVOL_WINSOR_CAP
+    assert f["active_days"] == 2
+    assert f["rvol_mean"] < scoring.RVOL_WINSOR_CAP
+
+
+def test_kline_features_invalid_volume_has_no_baseline():
+    bars = [
+        {"close": 100, "volume": volume, "date_int": 20260700 + i}
+        for i, volume in enumerate((0, -1, "bad", None, 10), 1)
+    ] + [{"close": 102, "volume": 30, "date_int": 20260706}]
+    f = scoring.compute_kline_features(bars, 20260706, min_history=2)
+    assert f["baseline_n"] == 1
+    assert f["has_history"] is False
+    assert f["rvol_event"] is None
+
+
 def test_percentiles():
     assert scoring.percentiles([1, 2, 3]) == [0.0, 0.5, 1.0]
     assert scoring.percentiles([None, 5]) == [0.0, 0.0]
     assert scoring.percentiles([None, 5, 9]) == [0.0, 0.0, 1.0]
 
 
-def test_calibrate_scores_are_diverse():
+def test_composite_accounts_for_exposure_and_negative_price_action():
+    direct = scoring.composite(5, 0.8, 0.8, 0.8, 1.0,
+                               exposure_type="direct", confidence=1.0)
+    diversified = scoring.composite(5, 0.8, 0.8, 0.8, 1.0,
+                                    exposure_type="diversified", confidence=1.0)
+    negative = scoring.composite(5, 0.8, 0.8, 0.8, 1.0,
+                                 exposure_type="direct", confidence=1.0,
+                                 neg_price_penalty=0.4)
+    assert direct > diversified
+    assert negative < direct
+
+
+def test_calibrate_scores_are_diverse_without_forced_five():
     scores = scoring.calibrate_scores([0.9, 0.88, 0.7, 0.5, 0.49])
-    assert scores[0] == 5.0
+    assert scores[0] < 5.0
     assert len(set(scores)) == len(scores)
     assert all(scores[i] > scores[i + 1] for i in range(len(scores) - 1))
     assert all(1.0 <= s <= 5.0 for s in scores)
@@ -107,8 +149,35 @@ class FakeQuotes:
         return out
 
 
+def test_select_excludes_low_relevance_when_enough_strong_names():
+    wf = ThemeWorkflow(FakeLLM(), FakeQuotes(), {"relevance_floor": 3})
+    cands = []
+    for i, rel in enumerate([5, 4, 3, 1, 1]):
+        cands.append({"code": f"185:X{i}", "rank": i + 1, "ai_relevance": rel,
+                      "exposure_type": "direct" if rel >= 3 else "diversified",
+                      "confidence": 1.0, "quality": 1.0,
+                      "rvol_event": 20.0 if rel < 3 else 1.0,
+                      "abnormal_return": 50.0 if rel < 3 else 0.0,
+                      "chg_pct": 50.0 if rel < 3 else 0.0})
+    chosen = wf.select(cands, 3, "stocks")
+    assert all(c["ai_relevance"] >= 3 for c in chosen)
+
+
+def test_narrative_uses_computed_rvol_key():
+    wf = ThemeWorkflow(FakeLLM(), FakeQuotes())
+    chosen = [{"code": "185:MU", "name": "Micron", "exposure_type": "direct",
+               "ai_relevance": 5, "confidence": 1.0, "reason": "HBM",
+               "rvol_event": 2.4, "rvol_mean": 1.8, "volume_confirmed": True,
+               "chg_pct": 3.0}]
+    records = []
+    # Exercise the method; FakeLLM accepts the narrative request and returns []
+    wf.narrate({"theme": "AI memory"}, {"thesis": "HBM"}, chosen, "stock")
+    assert chosen[0]["rvol_event"] == 2.4
+
+
 def test_end_to_end_mocked():
     wf = ThemeWorkflow(FakeLLM(), FakeQuotes(), {"stock_universe": 20, "etf_universe": 20, "stock_shortlist": 12, "etf_shortlist": 10})
+
     res = wf.run({"theme": "AI memory", "date": "2026-07-09", "url": "https://example.com/x"})
     assert len(res["ThemeStocks"]) == 8
     assert len(res["ThemeEtfs"]) == 5

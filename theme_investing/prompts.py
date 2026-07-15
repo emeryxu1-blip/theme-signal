@@ -23,25 +23,38 @@ Return JSON with keys:
 - "keywords": 5-15 short search keywords for this theme."""
 
 RELEVANCE_SYS = (
-    "You are scoring how exposed each company/ETF is to a specific investment theme. "
-    "Judge by real business/revenue exposure, not by ticker or name resemblance. "
-    "If you are unsure what a company does, give a low score with low confidence. "
-    "For ETFs, penalize leveraged/inverse/complex products unless the event directly supports them."
+    "You are a rigorous buy-side analyst scoring each company/ETF's TRUE business exposure "
+    "to a specific investment theme. "
+    "RULES — follow them strictly:\n"
+    "1. Score ONLY on real, quantifiable revenue or earnings exposure. A company that merely "
+    "operates in the same broad sector does NOT qualify as a beneficiary.\n"
+    "2. Do NOT use ticker symbol, company name, or keyword overlap as evidence of exposure. "
+    "A company named 'AI Corp' may score 1; a semiconductor IP firm may score 5.\n"
+    "3. Direct beneficiaries (score 4-5): the theme must plausibly drive >5% incremental revenue "
+    "or margin expansion for them WITHIN 12 months.\n"
+    "4. When you are uncertain what a company actually does, assign ai_relevance=1 and "
+    "confidence<=0.3. Never guess high.\n"
+    "5. For ETFs: score the weighted-average exposure of their TOP holdings, not the fund name. "
+    "Leveraged/inverse ETFs score 1 unless the event directly supports their specific direction.\n"
+    "6. Resist recency and popularity bias — a high-profile name that only tangentially touches "
+    "the theme should score lower than an obscure pure-play."
 )
 
-RELEVANCE_USER = """Theme brief:
+RELEVANCE_USER = """Theme brief (includes direct_beneficiaries, picks_and_shovels, false_positives):
 {brief}
 
-Score each candidate below for exposure to this theme.
+Score each candidate below for DIRECT business/revenue exposure to this theme.
+Reject keyword coincidences and broad-sector membership — see false_positives in the brief.
 Candidates (market_code | name):
 {candidates}
 
 Return a JSON array; one object per candidate, in the SAME order, each with:
 - "market_code": echo the candidate code exactly.
-- "ai_relevance": integer 1-5 (5 = pure-play/direct, 3 = meaningful, 1 = none).
+- "ai_relevance": integer 1-5 (5 = pure-play direct revenue driver, 4 = meaningful direct,
+  3 = clear enabler/supply-chain, 2 = marginal or speculative, 1 = no real exposure).
 - "exposure_type": one of "direct","enabler","supply_chain","beneficiary","diversified","unclear".
-- "confidence": float 0-1.
-- "reason": <=15 words."""
+- "confidence": float 0-1 (use <=0.3 when you are not sure what the company does).
+- "reason": <=15 words citing the SPECIFIC product/segment driving exposure, not just industry."""
 
 NARRATIVE_SYS = (
     "You are an equity research analyst writing concise, factual notes. "
