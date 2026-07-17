@@ -29,6 +29,7 @@ from ainvest_client import AInvestClient
 import config
 from config import load_llm_config, load_quote_config, load_env
 from llm_client import LLMClient
+from workflow import ThemeWorkflow
 
 
 def build_llm_client(cfg):
@@ -36,33 +37,55 @@ def build_llm_client(cfg):
         from anthropic_local_client import LocalClaudeClient
         return LocalClaudeClient(cfg)
     return LLMClient(cfg)
-from workflow import ThemeWorkflow
 
 
-def _read_payload(args) -> dict:
-    if args.payload:
-        return json.loads(args.payload)
-    if args.input:
-        with open(args.input, encoding="utf-8") as fh:
-            return json.load(fh)
-    data = sys.stdin.read().strip()
-    if not data:
-        raise SystemExit("no input payload provided")
-    return json.loads(data)
+def _positive_int(value: str) -> int:
+    """Argparse type for finite, non-empty universe limits."""
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than 0")
+    return parsed
 
 
-def main() -> int:
+def _nonnegative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be 0 or greater")
+    return parsed
+
+
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Theme-investing agentic workflow")
     ap.add_argument("payload", nargs="?", help="inline JSON payload")
     ap.add_argument("--input", help="path to JSON payload file")
-    ap.add_argument("--limit", type=int, help="cap BOTH stock and ETF universe size (smoke tests)")
-    ap.add_argument("--stock-universe", type=int)
-    ap.add_argument("--etf-universe", type=int)
-    ap.add_argument("--relevance-batch", type=int)
-    ap.add_argument("--stock-shortlist", type=int)
-    ap.add_argument("--etf-shortlist", type=int)
+    ap.add_argument(
+        "--limit",
+        type=_positive_int,
+        help=("screen at most the top N stocks by market cap AND rank at most N "
+              "theme-derived ETF candidates (default: 500 per asset class)"),
+    )
+    ap.add_argument("--stock-universe", type=_positive_int,
+                    help="override the top-N market-cap stock limit")
+    ap.add_argument("--etf-universe", type=_positive_int,
+                    help="override the maximum theme-derived ETF candidate count")
+    ap.add_argument("--relevance-batch", type=int,
+                    help="LLM candidates per relevance request during the scan (default 20)")
+    ap.add_argument("--max-scan", type=_nonnegative_int,
+                    help="additional safety cap per asset class; use 0 to disable")
+    ap.add_argument("--stock-target", type=int,
+                    help="number of qualifying stocks to emit (default 8)")
+    ap.add_argument("--etf-target", type=int,
+                    help="number of qualifying ETFs to emit (default 5)")
     ap.add_argument("--rvol-threshold", type=float,
                     help="event-window peak RVOL confirmation threshold (default 1.5)")
+    ap.add_argument("--relevance-threshold", type=float,
+                    help="minimum LLM relevance (1-5, fractional) for output (default 2.5)")
     ap.add_argument("--baseline-lookback", type=int,
                     help="number of pre-event trading bars used to compute the median "
                          "volume baseline for RVOL (default 20)")
@@ -84,20 +107,47 @@ def main() -> int:
     ap.add_argument("--quote-profile",
                     help="quote profile from env.json to use for this run (e.g. "
                          "production); overrides active_profiles.quote")
-    args = ap.parse_args()
+    return ap
 
-    payload = _read_payload(args)
 
+def workflow_options(args) -> dict:
+    """Translate CLI sizing knobs into workflow options.
+
+    ``--limit N`` sets a top-N market-cap stock boundary and an independent
+    maximum of N theme-derived ETF candidates. Per-asset overrides are applied
+    afterwards when supplied explicitly.
+    """
     opts = {}
-    if args.limit:
+    if args.limit is not None:
         opts["stock_universe"] = args.limit
         opts["etf_universe"] = args.limit
-    for key in ("stock_universe", "etf_universe", "relevance_batch",
-                "stock_shortlist", "etf_shortlist", "rvol_threshold",
-                "baseline_lookback", "min_history"):
+    for key in ("stock_universe", "etf_universe", "relevance_batch", "max_scan",
+                "stock_target", "etf_target", "rvol_threshold",
+                "baseline_lookback", "min_history", "relevance_threshold"):
         val = getattr(args, key)
         if val is not None:
             opts[key] = val
+    return opts
+
+
+def _read_payload(args) -> dict:
+    if args.payload:
+        return json.loads(args.payload)
+    if args.input:
+        with open(args.input, encoding="utf-8") as fh:
+            return json.load(fh)
+    data = sys.stdin.read().strip()
+    if not data:
+        raise SystemExit("no input payload provided")
+    return json.loads(data)
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+
+    payload = _read_payload(args)
+
+    opts = workflow_options(args)
 
     # Resolve config once, applying per-run profile overrides (no writes to env.json).
     env = load_env()

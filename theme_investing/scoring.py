@@ -229,6 +229,40 @@ def composite(
     return quality_adj * (1.0 - max(0.0, min(0.5, neg_price_penalty)))
 
 
+def theme_exposure(
+    ai_relevance: int,
+    exposure_type: str = "unclear",
+    confidence: float = 0.5,
+    *,
+    market_confirm: bool = False,
+) -> float:
+    """Collapse the LLM-provided signals into one [0, 1] "Theme exposure" score.
+
+    Combines the model's semantic relevance (1-5), the exposure-type quality
+    (via ``EXPOSURE_WEIGHT``), and its confidence into a single headline number.
+    ``market_confirm`` (a volume spike with a positive abnormal return) applies a
+    small uplift so a data-confirmed name edges ahead of an unconfirmed peer.
+
+    Parameters
+    ----------
+    ai_relevance:
+        LLM integer rating 1-5 (clamped internally).
+    exposure_type:
+        One of the keys in ``EXPOSURE_WEIGHT``; scales the score.
+    confidence:
+        LLM confidence in [0, 1]; a low value downscales the score.
+    market_confirm:
+        When True, apply a bounded uplift for market-confirmed names.
+    """
+    ai_norm = (max(1, min(5, ai_relevance)) - 1) / 4.0
+    exposure_scale = EXPOSURE_WEIGHT.get(exposure_type, EXPOSURE_WEIGHT["unclear"])
+    conf_scale = max(0.5, min(1.0, confidence))
+    score = ai_norm * exposure_scale * conf_scale
+    if market_confirm:
+        score = min(1.0, score * 1.10)
+    return score
+
+
 def calibrate_scores(
     sorted_composites: list[float],
     *,
