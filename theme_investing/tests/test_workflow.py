@@ -8,7 +8,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import scoring
 from ainvest_client import AInvestClient
-from cli import _positive_int, build_parser, workflow_options
+from cli import (_build_output, _positive_int, _serialize_output, build_parser,
+                 workflow_options)
 from etf_preselection import match_theme_pools, preselect_etfs
 from workflow import ThemeWorkflow, validate_input
 
@@ -125,6 +126,35 @@ def test_validate_input_rejects_bad():
             assert False
         except ValueError:
             pass
+
+
+def test_cli_output_includes_all_original_input_fields():
+    payload = {
+        "theme": "AI memory",
+        "date": "2026-07-09",
+        "url": "https://example.com/x",
+        "cover": "https://example.com/cover.png",
+        "future_metadata": {"source": "input"},
+    }
+    workflow_result = {
+        "ThemeStocks": [{"market_code": "185:MU", "event_date": "2026-07-09"}],
+        "ThemeEtfs": [{"market_code": "185:SMH", "event_date": "2026-07-09"}],
+        "ThemeFAQ": [],
+    }
+
+    output = _build_output(payload, workflow_result)
+
+    assert output["cover"] == payload["cover"]
+    assert output["future_metadata"] == payload["future_metadata"]
+    assert output["ThemeStocks"] == [{"market_code": "185:MU"}]
+    assert output["ThemeEtfs"] == [{"market_code": "185:SMH"}]
+    assert workflow_result["ThemeStocks"][0]["event_date"] == "2026-07-09"
+
+    serialized = _serialize_output(output)
+    assert "\n" not in serialized
+    assert '": ' not in serialized
+    assert ', ' not in serialized
+    assert json.loads(serialized) == output
 
 
 def test_limit_cli_sets_independent_stock_and_etf_caps():

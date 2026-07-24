@@ -142,6 +142,24 @@ def _read_payload(args) -> dict:
     return json.loads(data)
 
 
+def _build_output(payload: dict, workflow_result: dict) -> dict:
+    """Build the public CLI result without duplicating the top-level date."""
+    output = {**payload, **workflow_result}
+    for collection in ("ThemeStocks", "ThemeEtfs"):
+        if isinstance(output.get(collection), list):
+            output[collection] = [
+                {key: value for key, value in item.items() if key != "event_date"}
+                if isinstance(item, dict) else item
+                for item in output[collection]
+            ]
+    return output
+
+
+def _serialize_output(output: dict) -> str:
+    """Serialize the public result as compact JSON with no trailing newline."""
+    return json.dumps(output, ensure_ascii=False, separators=(",", ":"))
+
+
 def main() -> int:
     args = build_parser().parse_args()
 
@@ -181,8 +199,8 @@ def main() -> int:
     llm = build_llm_client(llm_cfg)
     quotes = AInvestClient(quote_cfg)
     wf = ThemeWorkflow(llm, quotes, opts)
-    result = wf.run(payload)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    result = _build_output(payload, wf.run(payload))
+    sys.stdout.write(_serialize_output(result))
     return 0
 
 
