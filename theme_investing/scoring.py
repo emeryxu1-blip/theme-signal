@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import date
 
 # ---------------------------------------------------------------------------
@@ -12,7 +13,7 @@ from datetime import date
 W_AI = 0.45     # LLM semantic exposure to the theme
 W_RVOL = 0.25   # event-window relative volume (participation spike)
 W_ABR = 0.20    # abnormal return vs benchmark (theme-specific move)
-W_CHG = 0.10    # raw event->today price change (direction/magnitude)
+W_CHG = 0.10    # absolute event->today price-change magnitude
 
 # ---------------------------------------------------------------------------
 # Exposure-type multipliers applied to the AI-relevance weight component.
@@ -39,13 +40,19 @@ def event_date_int(iso_date: str) -> int:
     return int(f"{y}{m}{d}")
 
 
-def _valid_volume(v) -> float | None:
-    """Return v if it is a positive finite number, otherwise None."""
+def _finite_float(v) -> float | None:
+    """Return a finite float, or ``None`` for missing/invalid values."""
     try:
         f = float(v)
-        return f if f > 0 else None
     except (TypeError, ValueError):
         return None
+    return f if math.isfinite(f) else None
+
+
+def _valid_volume(v) -> float | None:
+    """Return v if it is a positive finite number, otherwise None."""
+    f = _finite_float(v)
+    return f if f is not None and f > 0 else None
 
 
 def _median(xs: list) -> float | None:
@@ -62,8 +69,10 @@ def window_return(bars: list[dict], ev_int: int) -> float | None:
         return None
     latest = bars[-1]
     ev = next((b for b in bars if (b.get("date_int") or 0) >= ev_int), None)
-    if ev and ev.get("close") and latest.get("close"):
-        return (latest["close"] / ev["close"] - 1.0) * 100.0
+    event_close = _finite_float(ev.get("close")) if ev else None
+    latest_close = _finite_float(latest.get("close"))
+    if event_close is not None and event_close > 0 and latest_close is not None:
+        return (latest_close / event_close - 1.0) * 100.0
     return None
 
 
@@ -118,7 +127,7 @@ def compute_kline_features(
         return out
 
     latest = bars[-1]
-    out["latest_close"] = latest.get("close")
+    out["latest_close"] = _finite_float(latest.get("close"))
     out["latest_volume"] = _valid_volume(latest.get("volume"))
 
     # Split into pre-event and event-window bars.
@@ -135,10 +144,12 @@ def compute_kline_features(
 
     # Event bar close & price change.
     event_bar = window[0] if window else None
-    if event_bar and event_bar.get("close"):
-        out["event_close"] = event_bar["close"]
-        if latest.get("close"):
-            out["chg_pct"] = (latest["close"] / event_bar["close"] - 1.0) * 100.0
+    event_close = _finite_float(event_bar.get("close")) if event_bar else None
+    latest_close = _finite_float(latest.get("close"))
+    if event_close is not None and event_close > 0:
+        out["event_close"] = event_close
+        if latest_close is not None:
+            out["chg_pct"] = (latest_close / event_close - 1.0) * 100.0
     else:
         out["quality"] *= 0.5  # event bar missing (future/holiday/no data)
 
@@ -161,27 +172,55 @@ def compute_kline_features(
         out["quality"] *= 0.6  # cannot confirm participation without history
 
     # Abnormal return vs benchmark.
-    if out["chg_pct"] is not None and benchmark_return is not None:
-        out["abnormal_return"] = out["chg_pct"] - benchmark_return
+    finite_benchmark_return = _finite_float(benchmark_return)
+    if out["chg_pct"] is not None and finite_benchmark_return is not None:
+        out["abnormal_return"] = out["chg_pct"] - finite_benchmark_return
     return out
 
 
 def percentiles(values: list) -> list:
-    """Rank-based percentile in [0, 1].
+    """Tie-aware rank percentile in [0, 1].
 
     Missing (None) values are kept at 0.0 to indicate unavailability, which is
     weaker than any real observation.  When *all* values are missing or there is
-    only one distinct value, the result is all zeros.
+    fewer than two distinct valid values, the result is all zeros.  Tied values
+    receive their shared average rank so input order cannot break a tie.
     """
-    idx = [i for i, v in enumerate(values) if v is not None]
+    numeric = [_finite_float(value) for value in values]
+    idx = [i for i, value in enumerate(numeric) if value is not None]
     out = [0.0] * len(values)
-    if not idx:
+    if not idx or len({numeric[i] for i in idx}) < 2:
         return out
-    order = sorted(idx, key=lambda i: values[i])
-    denom = max(len(order) - 1, 1)
-    for rank, i in enumerate(order):
-        out[i] = rank / denom
+    order = sorted(idx, key=lambda i: numeric[i])
+    denom = len(order) - 1
+    start = 0
+    while start < len(order):
+        end = start
+        while (
+            end + 1 < len(order)
+            and numeric[order[end + 1]] == numeric[order[start]]
+        ):
+            end += 1
+        shared_rank = (start + end) / 2.0
+        for position in range(start, end + 1):
+            out[order[position]] = shared_rank / denom
+        start = end + 1
     return out
+
+
+def absolute_percentiles(values: list) -> list:
+    """Tie-aware percentiles ranked by absolute numeric magnitude.
+
+    The original signs are not modified: this helper only constructs the
+    cross-sectional ranks used for market-strength scoring.  Thus equal moves
+    in opposite directions receive equal percentile values.  Missing and
+    single-distinct-magnitude samples follow :func:`percentiles` semantics.
+    """
+    magnitudes = []
+    for value in values:
+        number = _finite_float(value)
+        magnitudes.append(None if number is None else abs(number))
+    return percentiles(magnitudes)
 
 
 def composite(
@@ -203,7 +242,7 @@ def composite(
         LLM integer rating 1–5 (clamped internally).
     rvol_pct, abret_pct, chg_pct_pct:
         Cross-sectional percentile ranks in [0, 1] for event-window peak RVOL,
-        abnormal return, and raw price change respectively.
+        abnormal return, and absolute raw price-change magnitude respectively.
     quality:
         Data-quality scalar in [0, 1] from ``compute_kline_features``.
     exposure_type:
@@ -212,9 +251,9 @@ def composite(
         LLM confidence in [0, 1]; downscales the AI-relevance component slightly
         when the model is uncertain.
     neg_price_penalty:
-        Extra penalty in [0, 1) to apply when price action is unambiguously
-        negative (e.g. the stock fell into a clearly declining event window).
-        Caller is responsible for computing this; defaults to no penalty.
+        Deprecated compatibility argument.  It is intentionally ignored: the
+        magnitude of a market move is direction-neutral for both bullish and
+        bearish themes.
     """
     ai_norm = (max(1, min(5, ai_relevance)) - 1) / 4.0
     # Scale AI weight by exposure quality and LLM confidence.
@@ -225,8 +264,10 @@ def composite(
     # Apply data-quality penalty (capped: a name with poor data can score at most
     # 60% of its raw composite).
     quality_adj = raw * (0.6 + 0.4 * quality)
-    # Apply negative price-action penalty after quality adjustment.
-    return quality_adj * (1.0 - max(0.0, min(0.5, neg_price_penalty)))
+    # Keep accepting ``neg_price_penalty`` so older callers do not fail, while
+    # deliberately removing the former one-sided treatment of falling prices.
+    _ = neg_price_penalty
+    return quality_adj
 
 
 def theme_exposure(
@@ -235,13 +276,17 @@ def theme_exposure(
     confidence: float = 0.5,
     *,
     market_confirm: bool = False,
+    market_strength: float | None = None,
 ) -> float:
     """Collapse the LLM-provided signals into one [0, 1] "Theme exposure" score.
 
     Combines the model's semantic relevance (1-5), the exposure-type quality
     (via ``EXPOSURE_WEIGHT``), and its confidence into a single headline number.
-    ``market_confirm`` (a volume spike with a positive abnormal return) applies a
-    small uplift so a data-confirmed name edges ahead of an unconfirmed peer.
+    ``market_strength`` applies a continuous, bounded uplift of at most 10% so
+    unusually large, well-participated moves can break semantic-score ties
+    without establishing theme relevance on their own.  The legacy
+    ``market_confirm`` flag remains supported and maps to full strength when
+    ``market_strength`` is omitted.
 
     Parameters
     ----------
@@ -252,15 +297,23 @@ def theme_exposure(
     confidence:
         LLM confidence in [0, 1]; a low value downscales the score.
     market_confirm:
-        When True, apply a bounded uplift for market-confirmed names.
+        Legacy compatibility flag.  When ``market_strength`` is omitted, True
+        maps to 1.0 and False maps to 0.0.
+    market_strength:
+        Continuous confirmation strength in [0, 1].  Values outside the range
+        are clamped.  When supplied, it takes precedence over ``market_confirm``.
     """
     ai_norm = (max(1, min(5, ai_relevance)) - 1) / 4.0
     exposure_scale = EXPOSURE_WEIGHT.get(exposure_type, EXPOSURE_WEIGHT["unclear"])
     conf_scale = max(0.5, min(1.0, confidence))
     score = ai_norm * exposure_scale * conf_scale
-    if market_confirm:
-        score = min(1.0, score * 1.10)
-    return score
+    strength = (
+        (1.0 if market_confirm else 0.0)
+        if market_strength is None
+        else market_strength
+    )
+    strength = max(0.0, min(1.0, strength))
+    return min(1.0, score * (1.0 + 0.10 * strength))
 
 
 def calibrate_scores(

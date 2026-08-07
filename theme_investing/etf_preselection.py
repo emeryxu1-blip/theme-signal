@@ -2,9 +2,9 @@
 
 The ETF universe is theme-derived rather than globally ranked by AUM:
 
-* selected theme stocks expand to ETFs that actually hold them;
-* a static registry adds curated AInvest pools, especially for non-equity themes;
-* factual filters and holdings arithmetic run in code;
+* theme stocks expand to related ETFs, including derivatives without physical weight;
+* a static registry adds curated AInvest pools, including a bearish inverse source;
+* factual direction filters and holdings arithmetic run in code;
 * AUM is only the last investability tie-breaker.
 
 All source iterators and the final unique-candidate set are bounded by ``limit``.
@@ -50,6 +50,14 @@ class PreselectionResult:
 # Skills/ainvest-openapi-quote/references/legacy/id_dict.md.  Ambiguous one-word
 # aliases are intentionally avoided where producer equities and direct-asset funds
 # would otherwise be conflated.
+INVERSE_SP500_POOL = PoolSpec(
+    "inverse_sp500",
+    "Inverse S&P 500 ETFs",
+    "6908b49e8738843bb3ba8668",
+    (),
+)
+
+
 THEME_POOLS: tuple[PoolSpec, ...] = (
     PoolSpec("semiconductors", "Semiconductor ETFs", "6908afc3069a48065f159368",
              ("semiconductor", "semiconductors", "chipmaker", "chipmakers", "memory chip",
@@ -225,9 +233,17 @@ def _brief_text(brief: dict) -> str:
 
 
 def match_theme_pools(
-    theme: str, brief: dict | None = None, article_title: str = "", *, max_pools: int = 4
+    theme: str,
+    brief: dict | None = None,
+    article_title: str = "",
+    *,
+    max_pools: int = 4,
+    theme_direction: str = "bullish",
 ) -> list[PoolMatch]:
     """Map text to curated pools with exact phrase matching, without an LLM."""
+    direction = _theme_direction(theme_direction)
+    pool_limit = max(0, max_pools)
+    theme_pool_limit = pool_limit - 1 if direction == "bearish" and pool_limit else pool_limit
     sources = (
         ("theme", _normalise(theme), 3.0),
         ("article", _normalise(article_title), 2.0),
@@ -247,7 +263,14 @@ def match_theme_pools(
         if best:
             matches.append(best)
     matches.sort(key=lambda m: (-m.strength, -len(_normalise(m.alias)), m.spec.key))
-    return matches[:max(0, max_pools)]
+    selected = matches[:theme_pool_limit]
+    if direction == "bearish" and pool_limit:
+        # The inverse pool is a direction-specific discovery source, not a text
+        # match.  Keeping it inside max_pools preserves the existing source cap.
+        selected.append(PoolMatch(
+            INVERSE_SP500_POOL, 1.0, "theme_direction", "bearish",
+        ))
+    return selected
 
 
 def _finite_float(value: object) -> float | None:
@@ -256,6 +279,11 @@ def _finite_float(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def _theme_direction(value: object) -> str:
+    """Return the one direction that may enable inverse products."""
+    return "bearish" if str(value or "").strip().lower() == "bearish" else "bullish"
 
 
 def _stock_quality(stock: dict) -> float:
@@ -267,10 +295,6 @@ def _stock_quality(stock: dict) -> float:
     return rel * conf * exposure
 
 
-_RISK_NAME_RE = re.compile(
-    r"(?:\b(?:inverse|bear|ultrashort|ultrapro)\b|\b[2-9]x\b|\-\s*[2-9]x\b)",
-    re.IGNORECASE,
-)
 _ALTERNATIVE_STRATEGY_RE = re.compile(
     r"(?:style\s+premia|market\s+neutral|long[\s/\-]*short|managed\s+futures)",
     re.IGNORECASE,
@@ -279,21 +303,130 @@ _OPTION_INCOME_RE = re.compile(
     r"(?:yieldmax|option\s+income|options\s+income|covered[\s\-]*call)",
     re.IGNORECASE,
 )
+_NAME_MULTIPLE_RE = re.compile(
+    r"(?P<sign>[-\N{MINUS SIGN}])?\s*(?P<multiple>[1-9](?:\.\d+)?)\s*[x\N{MULTIPLICATION SIGN}](?![a-z0-9])",
+    re.IGNORECASE,
+)
+_INVERSE_NAME_RE = re.compile(r"\b(?:inverse|bear|ultrashort)\b", re.IGNORECASE)
+_NON_DIRECTIONAL_SHORT_RE = re.compile(
+    r"\b(?:ultra[\s-]+)?short[\s-]+(?:duration|term|maturity|dated|bond|treasury|credit|income)\b",
+    re.IGNORECASE,
+)
 
 
-def _hard_filter_reason(candidate: dict) -> str | None:
-    leverage = _finite_float(candidate.get("leverage"))
-    if leverage is not None and abs(leverage - 1.0) > 0.05:
-        return f"leverage={leverage:g}"
-    direction = str(candidate.get("direction") or "").strip().lower()
-    if direction == "short":
-        return "direction=Short"
-    if _RISK_NAME_RE.search(str(candidate.get("name") or "")):
-        return "leveraged/inverse name"
+@dataclass(frozen=True)
+class _DerivativeProfile:
+    direction: str
+    leverage: float
+    direction_source: str
+    leverage_source: str
+    ambiguous_leverage: bool = False
+    conflict: bool = False
+
+
+def _structured_direction(value: object) -> str | None:
+    text = _normalise(value)
+    if not text:
+        return None
+    if text in {"short", "inverse", "bear", "bearish", "negative"}:
+        return "short"
+    if text in {"long", "bull", "bullish", "positive"}:
+        return "long"
+    return None
+
+
+def _name_direction(name: object) -> str | None:
+    raw = str(name or "")
+    if not raw:
+        return None
+    if any(match.group("sign") for match in _NAME_MULTIPLE_RE.finditer(raw)):
+        return "short"
+    if _INVERSE_NAME_RE.search(raw):
+        return "short"
+    # "Short Duration Treasury" describes maturity, not inverse exposure.
+    without_duration = _NON_DIRECTIONAL_SHORT_RE.sub(" ", raw)
+    if re.search(r"\bshort\b", without_duration, re.IGNORECASE):
+        return "short"
+    return None
+
+
+def _name_leverage(name: object) -> float | None:
+    raw = str(name or "")
+    multiples = [float(match.group("multiple")) for match in _NAME_MULTIPLE_RE.finditer(raw)]
+    if multiples:
+        return max(multiples)
+    normalised = _normalise(raw)
+    if any(phrase in normalised for phrase in (
+            "quadruple", "four times", "four time", "4 times", "4 time")):
+        return 4.0
+    if any(phrase in normalised for phrase in (
+            "ultrapro", "triple short", "three times", "three time", "3 times", "3 time")):
+        return 3.0
+    if any(phrase in normalised for phrase in (
+            "ultrashort", "double short", "two times", "two time", "2 times", "2 time")):
+        return 2.0
+    return None
+
+
+def _derivative_profile(candidate: dict) -> _DerivativeProfile:
+    raw_direction = _structured_direction(candidate.get("direction"))
+    raw_leverage = _finite_float(candidate.get("leverage"))
+    name_direction = _name_direction(candidate.get("name")) if raw_direction is None else None
+    name_leverage = _name_leverage(candidate.get("name")) if raw_leverage is None else None
+
+    direction = raw_direction or name_direction or ("short" if raw_leverage is not None and raw_leverage < 0 else "long")
+    leverage = abs(raw_leverage) if raw_leverage is not None else (name_leverage or 1.0)
+    conflict = raw_direction == "long" and raw_leverage is not None and raw_leverage < 0
+    return _DerivativeProfile(
+        direction=direction,
+        leverage=leverage,
+        direction_source="metadata" if raw_direction is not None else (
+            "name" if name_direction is not None else
+            "leverage" if raw_leverage is not None and raw_leverage < 0 else "default"
+        ),
+        leverage_source="metadata" if raw_leverage is not None else (
+            "name" if name_leverage is not None else "default"
+        ),
+        ambiguous_leverage=(
+            raw_direction is None and name_direction is None and
+            raw_leverage is not None and
+            not math.isclose(abs(raw_leverage), 1.0, rel_tol=0.0, abs_tol=1e-9)
+        ),
+        conflict=conflict,
+    )
+
+
+def _hard_filter_reason(
+    candidate: dict,
+    theme_direction: str = "bullish",
+    *,
+    defer_ambiguous: bool = False,
+) -> str | None:
     strategy_text = " ".join(str(candidate.get(key) or "") for key in (
         "name", "fund_strategy", "fund_category", "fund_niche"))
     if _ALTERNATIVE_STRATEGY_RE.search(strategy_text):
         return "alternative long/short strategy"
+    profile = _derivative_profile(candidate)
+    if profile.conflict:
+        return "conflicting direction/leverage metadata"
+    if profile.leverage > 3.0:
+        return f"leverage={profile.leverage:g}"
+
+    if _theme_direction(theme_direction) == "bearish":
+        if profile.direction == "short":
+            if profile.leverage < 1.0:
+                return f"inverse leverage={profile.leverage:g}"
+            return None
+        if defer_ambiguous and profile.ambiguous_leverage:
+            return None
+        if not math.isclose(profile.leverage, 1.0, rel_tol=0.0, abs_tol=1e-9):
+            return f"leveraged-long={profile.leverage:g}"
+        return None
+
+    if not math.isclose(profile.leverage, 1.0, rel_tol=0.0, abs_tol=1e-9):
+        return f"leverage={profile.leverage:g}"
+    if profile.direction == "short":
+        return "direction=Short"
     return None
 
 
@@ -309,6 +442,7 @@ def _discover(
     pools: list[PoolMatch],
     limit: int,
     failures: list[str],
+    theme_direction: str = "bullish",
 ) -> tuple[dict[str, dict], int]:
     """Round-robin all finite theme sources until ``limit`` unique ETFs exist."""
     source_count = len(stocks) + len(pools)
@@ -340,18 +474,24 @@ def _discover(
         if code:
             probe = dict(row)
             probe["name"] = probe.get("name") or quotes.name_of(code)
-            if _hard_filter_reason(probe):
+            if _hard_filter_reason(
+                    probe, theme_direction, defer_ambiguous=True):
                 excluded += 1
             else:
                 candidate = candidates.setdefault(code, {
                     "code": code,
                     "name": probe["name"],
                     "anchor_weights": {},
+                    "related_stock_codes": {},
                     "pool_matches": {},
                     "source_order": len(candidates) + 1,
                 })
                 _merge_row(candidate, probe)
                 if kind == "stock":
+                    # The related-ETF endpoint is itself relationship evidence.
+                    # Derivative wrappers frequently have no physical holding
+                    # weight, so retain the source link independently of weight.
+                    candidate["related_stock_codes"][key] = True
                     weight = _finite_float(row.get("holding_weight"))
                     if weight is not None and weight > 0:
                         candidate["anchor_weights"][key] = weight
@@ -391,32 +531,127 @@ def _enrich(quotes, candidates: dict[str, dict], stocks: list[dict], failures: l
             weight = _finite_float(raw_weight)
             if code in candidates and weight is not None and weight > 0:
                 candidates[code]["anchor_weights"][stock_code] = weight
+                candidates[code].setdefault("related_stock_codes", {})[stock_code] = True
 
 
-def _is_single_stock_wrapper(candidate: dict, breadth: int, max_weight: float) -> bool:
+def _is_single_stock_wrapper(
+    candidate: dict,
+    breadth: int,
+    max_weight: float,
+    stocks: list[dict] | None = None,
+) -> bool:
     niche = _normalise(candidate.get("fund_niche"))
     category = _normalise(candidate.get("fund_category"))
-    if "single stock" in niche or "single stock" in category:
+    name = str(candidate.get("name") or "")
+    normalised_name = _normalise(name)
+    if (
+        "single stock" in niche or "single stock" in category or
+        "single stock" in normalised_name
+    ):
         return True
     benchmark = str(candidate.get("benchmark") or "").strip()
     if breadth <= 1 and re.fullmatch(r"\d+:[A-Za-z0-9.\-]+", benchmark):
         return True
+    # Sparse quote rows can omit niche and benchmark metadata.  An all-caps
+    # symbol embedded in a derivative-style product name still identifies a
+    # single-stock wrapper; exclude the fund's own ticker and product acronyms.
+    own_ticker = str(candidate.get("code") or "").partition(":")[2].upper()
+    symbol_patterns = (
+        r"\b(?:Short|Long|Inverse)\s+([A-Z][A-Z0-9.\-]{1,5})\b",
+        r"\b([A-Z][A-Z0-9.\-]{1,5})\s+(?:Bull|Bear)\b",
+    )
+    name_symbols = {
+        match.group(1).upper()
+        for pattern in symbol_patterns
+        for match in re.finditer(pattern, name)
+    }
+    name_symbols -= {
+        own_ticker, "ETF", "ETN", "UCITS", "USD", "DAILY", "SHORT", "LONG",
+        "BULL", "BEAR", "ULTRA", "SHARES", "TRADR", "T-REX", "S&P",
+    }
+    reference_patterns = (
+        r"\b(?:Short|SHORT|Long|LONG|Inverse|INVERSE)\s+"
+        r"([A-Z][A-Za-z0-9.&'\-]*(?:\s+[A-Z][A-Za-z0-9.&'\-]*){0,2}?)"
+        r"\s+(?:Daily|DAILY|ETF|ETN|Fund|$)",
+        r"\b([A-Z][A-Za-z0-9.&'\-]*(?:\s+[A-Z][A-Za-z0-9.&'\-]*){0,2}?)"
+        r"\s+(?:Bull|BULL|Bear|BEAR)\b",
+    )
+    name_references = [
+        _normalise(match.group(1))
+        for pattern in reference_patterns
+        for match in re.finditer(pattern, name)
+    ]
+    non_single_reference_re = re.compile(
+        r"\b(?:index|market|sector|semiconductor|technology|financial|energy|"
+        r"biotech|healthcare|industrial|materials|utilities|consumer|real estate|"
+        r"communication|artificial intelligence|cybersecurity|clean energy|s&p|"
+        r"nasdaq|dow|russell|treasury|bond|gold|silver|oil|bitcoin|ethereum|"
+        r"dollar|volatility|vix|duration|term|income)\b",
+        re.IGNORECASE,
+    )
+    company_name_reference = any(
+        reference and not non_single_reference_re.search(reference)
+        for reference in name_references
+    )
+    if breadth <= 1 and name_symbols and (
+            "daily" in normalised_name or _name_direction(name) is not None or
+            _name_leverage(name) is not None):
+        return True
+    if breadth <= 1 and company_name_reference and (
+            "daily" in normalised_name or _name_direction(name) is not None or
+            _name_leverage(name) is not None):
+        return True
+    if breadth <= 1 and stocks and (
+        "daily" in normalised_name or _name_direction(name) is not None or
+        _name_leverage(name) is not None
+    ):
+        for stock in stocks:
+            code = str(stock.get("code") or "").strip()
+            ticker = code.partition(":")[2] or code
+            stock_name = _normalise(stock.get("name"))
+            if (
+                (len(ticker) >= 2 and _contains_phrase(normalised_name, ticker)) or
+                (len(stock_name) >= 4 and _contains_phrase(normalised_name, stock_name))
+            ):
+                return True
     return breadth <= 1 and max_weight > 80.0
 
 
+def _benchmark_stock_matches(candidate: dict, stocks: list[dict]) -> list[str]:
+    benchmark = str(candidate.get("benchmark") or "").strip()
+    if not benchmark:
+        return []
+    benchmark_normalised = _normalise(benchmark)
+    matched: list[str] = []
+    for stock in stocks:
+        code = str(stock.get("code") or "").strip()
+        ticker = code.partition(":")[2] or code
+        if not code:
+            continue
+        if benchmark.casefold() == code.casefold() or _contains_phrase(
+                benchmark_normalised, ticker):
+            matched.append(code)
+    return matched
+
+
 def _rank_candidates(
-    candidates: dict[str, dict], stocks: list[dict], limit: int
+    candidates: dict[str, dict],
+    stocks: list[dict],
+    limit: int,
+    theme_direction: str = "bullish",
 ) -> tuple[list[dict], int]:
+    direction_mode = _theme_direction(theme_direction)
     stock_by_code = {stock["code"]: stock for stock in stocks}
     quality = {code: _stock_quality(stock) for code, stock in stock_by_code.items()}
     ranked: list[dict] = []
     excluded = 0
 
     for candidate in candidates.values():
-        hard_reason = _hard_filter_reason(candidate)
+        hard_reason = _hard_filter_reason(candidate, direction_mode)
         if hard_reason:
             excluded += 1
             continue
+        derivative = _derivative_profile(candidate)
         holdings = []
         for stock_code, raw_weight in candidate.get("anchor_weights", {}).items():
             weight = _finite_float(raw_weight)
@@ -435,26 +670,68 @@ def _rank_candidates(
         weighted_exposure = sum(item["weight_pct"] * item["quality"] for item in holdings)
         breadth = sum(1 for item in holdings if item["weight_pct"] >= 0.25)
         max_weight = max((item["weight_pct"] for item in holdings), default=0.0)
-        if _is_single_stock_wrapper(candidate, breadth, max_weight):
-            excluded += 1
-            continue
 
         pool_matches = list(candidate.get("pool_matches", {}).values())
         pool_keys = {match.spec.key for match in pool_matches}
         strategy_text = " ".join(str(candidate.get(key) or "") for key in (
             "name", "fund_strategy", "fund_category", "fund_niche"))
-        if _OPTION_INCOME_RE.search(strategy_text) and "covered_call" not in pool_keys:
+        if _OPTION_INCOME_RE.search(strategy_text) and (
+                direction_mode == "bearish" or "covered_call" not in pool_keys):
+            excluded += 1
+            continue
+
+        related_codes = set(candidate.get("related_stock_codes", {})) | set(
+            candidate.get("anchor_weights", {}))
+        related_codes &= set(stock_by_code)
+        benchmark_codes = set(_benchmark_stock_matches(candidate, stocks))
+        inverse_pool_evidence = INVERSE_SP500_POOL.key in pool_keys
+        thematic_benchmark_evidence = bool(
+            candidate.get("benchmark") and (pool_keys - {INVERSE_SP500_POOL.key})
+        )
+        inverse_evidence: list[str] = []
+        if related_codes:
+            inverse_evidence.append("related_stock")
+        if benchmark_codes:
+            inverse_evidence.append("selected_stock_benchmark")
+        elif thematic_benchmark_evidence:
+            inverse_evidence.append("thematic_benchmark")
+        if inverse_pool_evidence:
+            inverse_evidence.append("inverse_sp500_pool")
+        verified_inverse = (
+            direction_mode == "bearish" and derivative.direction == "short" and
+            bool(inverse_evidence)
+        )
+
+        single_stock_wrapper = _is_single_stock_wrapper(
+            candidate, breadth, max_weight, stocks,
+        )
+        if single_stock_wrapper and not (
+                verified_inverse and bool(related_codes or benchmark_codes)):
+            excluded += 1
+            continue
+        if derivative.direction == "short" and not verified_inverse:
             excluded += 1
             continue
         pool_strength = min(max((m.strength for m in pool_matches), default=0.0) / 3.25, 1.0)
-        if weighted_exposure <= 0 and not pool_matches:
+        if weighted_exposure <= 0 and not pool_matches and not verified_inverse:
             excluded += 1
             continue
+
+        inverse_base_floor = 0.0
+        if verified_inverse and (related_codes or benchmark_codes):
+            # A related-underlying or exact selected-stock benchmark remains
+            # strong exposure evidence even when a derivative holds no shares.
+            inverse_base_floor = 0.30 + 0.15 * pool_strength
+        elif verified_inverse and thematic_benchmark_evidence:
+            inverse_base_floor = 0.20 + 0.15 * pool_strength
 
         if weighted_exposure > 0:
             holding_component = min(weighted_exposure / 50.0, 1.0)
             breadth_component = min(breadth / max(1, min(len(stocks), 5)), 1.0)
             static_score = 0.80 * holding_component + 0.15 * breadth_component + 0.05 * pool_strength
+            static_score = max(static_score, inverse_base_floor)
+        elif inverse_base_floor:
+            static_score = inverse_base_floor
         elif pool_keys & _DIRECT_ASSET_POOL_KEYS or not stocks:
             # Curated-pool membership is deterministic evidence for asset themes
             # (gold, bonds, Bitcoin, etc.) where stock holdings are inapplicable.
@@ -466,6 +743,16 @@ def _rank_candidates(
             static_score = 0.10 + 0.15 * pool_strength
         static_score = max(0.05, min(1.0, static_score))
 
+        normalised_leverage = max(0.0, min(1.0, (derivative.leverage - 1.0) / 2.0))
+        if direction_mode == "bearish":
+            directional_score = (
+                0.50 + 0.45 * static_score + 0.05 * normalised_leverage
+                if verified_inverse else
+                0.45 * static_score
+            )
+        else:
+            directional_score = static_score
+
         aum = _finite_float(candidate.get("aum"))
         candidate.update({
             "matched_holdings": holdings,
@@ -474,25 +761,46 @@ def _rank_candidates(
             "theme_breadth": breadth,
             "pool_labels": sorted(m.spec.label for m in pool_matches),
             "pool_strength": pool_strength,
-            "preselect_score": static_score,
-            "static_theme_exposure": static_score,
+            "preselect_score": directional_score,
+            "base_theme_exposure": static_score,
+            "static_theme_exposure": directional_score,
             "ai_relevance": round(1.0 + 4.0 * static_score, 1),
             "confidence": 0.95 if weighted_exposure >= 10 else (0.85 if weighted_exposure > 0 else 0.75),
             "exposure_type": (
-                "direct" if raw_weight >= 35 else
+                "direct" if verified_inverse or raw_weight >= 35 else
                 "beneficiary" if weighted_exposure > 0 else
                 "direct" if str(candidate.get("asset_class") or "").lower() not in ("equity", "stock", "index") else
                 "diversified"
             ),
+            "direction": "Short" if derivative.direction == "short" else "Long",
+            "leverage": derivative.leverage,
+            "direction_source": derivative.direction_source,
+            "leverage_source": derivative.leverage_source,
+            "is_inverse": verified_inverse,
+            "verified_inverse": verified_inverse,
+            "single_stock_inverse": single_stock_wrapper and verified_inverse,
+            "inverse_evidence": inverse_evidence,
+            "benchmark_match_codes": sorted(benchmark_codes),
+            "normalised_leverage": normalised_leverage,
             "metric": aum,
             "aum": aum,
             "relevance_status": "deterministic",
         })
-        if holdings:
+        if verified_inverse:
+            linked = sorted(related_codes | benchmark_codes)
+            linked_text = ", ".join(code.partition(":")[2] for code in linked[:4])
+            evidence_text = (
+                f" linked to {linked_text}" if linked_text else
+                f" in {', '.join(candidate['pool_labels'])}" if candidate["pool_labels"] else ""
+            )
+            candidate["reason"] = (
+                f"Targets {derivative.leverage:g}x daily inverse exposure{evidence_text}."
+            )
+        elif holdings:
             detail = ", ".join(
                 f"{item['ticker']} {item['weight_pct']:.1f}%" for item in holdings[:4])
             candidate["reason"] = (
-                f"Holds {breadth} selected theme stocks ({raw_weight:.1f}% total): {detail}."
+                f"Holds {breadth} theme-linked companies ({raw_weight:.1f}% total): {detail}."
             )
         else:
             candidate["reason"] = f"Member of {', '.join(candidate['pool_labels'])}."
@@ -503,6 +811,7 @@ def _rank_candidates(
         -candidate["weighted_theme_exposure_pct"],
         -candidate["theme_breadth"],
         -candidate["pool_strength"],
+        -candidate["normalised_leverage"],
         -(candidate.get("aum") if candidate.get("aum") is not None else -1.0),
         candidate["code"],
     ))
@@ -520,16 +829,28 @@ def preselect_etfs(
     article_title: str,
     limit: int,
     max_pools: int = 4,
+    theme_direction: str = "bullish",
     log: Callable[[str], None] | None = None,
 ) -> PreselectionResult:
     """Build and deterministically rank at most ``limit`` thematic ETF candidates."""
     if limit <= 0:
         raise ValueError("ETF candidate limit must be greater than 0")
-    pools = match_theme_pools(theme, brief, article_title, max_pools=max_pools)
+    direction_mode = _theme_direction(theme_direction)
+    pools = match_theme_pools(
+        theme,
+        brief,
+        article_title,
+        max_pools=max_pools,
+        theme_direction=direction_mode,
+    )
     failures: list[str] = []
-    candidates, discovery_excluded = _discover(quotes, stocks, pools, limit, failures)
+    candidates, discovery_excluded = _discover(
+        quotes, stocks, pools, limit, failures, direction_mode,
+    )
     _enrich(quotes, candidates, stocks, failures)
-    ranked, ranking_excluded = _rank_candidates(candidates, stocks, limit)
+    ranked, ranking_excluded = _rank_candidates(
+        candidates, stocks, limit, direction_mode,
+    )
     result = PreselectionResult(
         candidates=ranked,
         pools=pools,
@@ -539,7 +860,7 @@ def preselect_etfs(
     )
     if log:
         pool_names = ", ".join(match.spec.label for match in pools) or "none"
-        log(f"ETF static pools: {pool_names}")
+        log(f"ETF static pools ({direction_mode}): {pool_names}")
         log(f"ETF preselection: {result.discovered} unique candidates, "
             f"{len(ranked)} ranked (limit={limit}); "
             f"{result.excluded} risky source/candidate rows excluded")

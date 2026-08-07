@@ -36,6 +36,19 @@ def test_kline_features_event_window_and_abnormal_return():
     assert f["has_history"] is True  # five pre-event bars form a baseline
 
 
+def test_kline_features_preserve_negative_change_and_abnormal_return():
+    bars = [
+        {"close": 95, "volume": 10, "date_int": 20260707},
+        {"close": 97, "volume": 11, "date_int": 20260708},
+        {"close": 100, "volume": 30, "date_int": 20260709},
+        {"close": 80, "volume": 35, "date_int": 20260710},
+    ]
+    features = scoring.compute_kline_features(
+        bars, 20260709, benchmark_return=-5.0, min_history=2)
+    assert round(features["chg_pct"], 1) == -20.0
+    assert round(features["abnormal_return"], 1) == -15.0
+
+
 def test_kline_features_requires_baseline():
     bars = [{"t": i, "close": 100+i, "volume": 10+i, "date_int": 20260700+i} for i in range(1, 12)]
     f = scoring.compute_kline_features(bars, 20260720)
@@ -77,9 +90,21 @@ def test_percentiles():
     assert scoring.percentiles([1, 2, 3]) == [0.0, 0.5, 1.0]
     assert scoring.percentiles([None, 5]) == [0.0, 0.0]
     assert scoring.percentiles([None, 5, 9]) == [0.0, 0.0, 1.0]
+    assert scoring.percentiles([1, 2, 2, 3]) == [0.0, 0.5, 0.5, 1.0]
 
 
-def test_composite_accounts_for_exposure_and_negative_price_action():
+def test_absolute_percentiles_are_sign_neutral_and_tie_aware():
+    values = [-8.0, 8.0, 2.0, None]
+    ranked = scoring.absolute_percentiles(values)
+    assert ranked[0] == ranked[1]
+    assert ranked[0] > ranked[2]
+    assert ranked[3] == 0.0
+    assert scoring.absolute_percentiles([-8.0, 8.0]) == [0.0, 0.0]
+    assert scoring.absolute_percentiles([1.0, 2.0, float("nan")]) == [0.0, 1.0, 0.0]
+    assert scoring.absolute_percentiles([1.0, float("inf")]) == [0.0, 0.0]
+
+
+def test_composite_accounts_for_exposure_without_negative_price_penalty():
     direct = scoring.composite(5, 0.8, 0.8, 0.8, 1.0,
                                exposure_type="direct", confidence=1.0)
     diversified = scoring.composite(5, 0.8, 0.8, 0.8, 1.0,
@@ -88,7 +113,7 @@ def test_composite_accounts_for_exposure_and_negative_price_action():
                                  exposure_type="direct", confidence=1.0,
                                  neg_price_penalty=0.4)
     assert direct > diversified
-    assert negative < direct
+    assert negative == direct
 
 
 def test_calibrate_scores_are_diverse_without_forced_five():
@@ -110,11 +135,28 @@ def test_theme_exposure_combines_llm_signals():
     low_conf = scoring.theme_exposure(5, "direct", 0.2)
     low_rel = scoring.theme_exposure(2, "direct", 0.9)
     confirmed = scoring.theme_exposure(5, "direct", 0.9, market_confirm=True)
+    half_strength = scoring.theme_exposure(5, "direct", 0.9, market_strength=0.5)
     assert strong > weak_exposure          # exposure type matters
     assert strong > low_conf               # confidence matters
     assert strong > low_rel                # relevance matters
     assert confirmed > strong              # market confirmation lifts the score
+    assert strong < half_strength < confirmed
     assert 0.0 <= strong <= 1.0
+
+
+def test_etf_market_strength_uplift_is_continuous_and_bounded():
+    wf = ThemeWorkflow(FakeLLM(), FakeQuotes())
+    unconfirmed = {"code": "185:A", "static_theme_exposure": 0.5,
+                   "market_strength": 0.0}
+    partial = {"code": "185:B", "static_theme_exposure": 0.5,
+               "market_strength": 0.5}
+    full = {"code": "185:C", "static_theme_exposure": 0.5,
+            "market_strength": 1.0}
+    wf._assign_theme_exposure([unconfirmed, partial, full])
+    assert unconfirmed["theme_exposure_raw"] == 0.5
+    assert partial["theme_exposure_raw"] == 0.525
+    assert full["theme_exposure_raw"] == 0.55
+    assert full["theme_exposure_raw"] <= 1.10 * unconfirmed["theme_exposure_raw"]
 
 
 def test_validate_input_rejects_bad():
@@ -126,6 +168,30 @@ def test_validate_input_rejects_bad():
             assert False
         except ValueError:
             pass
+
+
+def test_event_brief_normalizes_internal_theme_direction():
+    class BriefLLM:
+        def __init__(self, direction):
+            self.direction = direction
+            self.system = ""
+            self.user = ""
+
+        def chat_json(self, system, user, **kw):
+            self.system = system
+            self.user = user
+            return {"summary": "s", "thesis": "t", "theme_direction": self.direction}
+
+    inp = {"theme": "AI Bubble", "date": "2026-08-05", "url": "https://example.com/x"}
+    article = {"title": "Bubble warning", "text": "AI valuations may de-rate."}
+    bearish_llm = BriefLLM("bearish")
+    bearish = ThemeWorkflow(bearish_llm, FakeQuotes()).event_brief(inp, article)
+    invalid = ThemeWorkflow(BriefLLM("mixed"), FakeQuotes()).event_brief(inp, article)
+
+    assert bearish["theme_direction"] == "bearish"
+    assert invalid["theme_direction"] == "bullish"
+    assert '"theme_direction"' in bearish_llm.user
+    assert "dominant investable direction" in bearish_llm.system
 
 
 def test_cli_output_includes_all_original_input_fields():
@@ -195,7 +261,8 @@ def _fake_relevance(code):
 class FakeLLM:
     def chat_json(self, system, user, **kw):
         if "Return JSON with keys" in user:
-            return {"summary": "s", "thesis": "t", "direct_beneficiaries": ["memory"],
+            return {"summary": "s", "thesis": "t", "theme_direction": "bullish",
+                    "direct_beneficiaries": ["memory"],
                     "picks_and_shovels": [], "second_order": [], "false_positives": [], "keywords": ["memory"]}
         if "Score each candidate" in user:
             out = []
@@ -332,7 +399,8 @@ class ScriptedLLM:
         self.scored_codes = []
     def chat_json(self, system, user, **kw):
         if "Return JSON with keys" in user:
-            return {"summary": "s", "thesis": "t", "direct_beneficiaries": [],
+            return {"summary": "s", "thesis": "t", "theme_direction": "bullish",
+                    "direct_beneficiaries": [],
                     "picks_and_shovels": [], "second_order": [], "false_positives": [], "keywords": []}
         if "Score each candidate" in user:
             out = []
@@ -364,11 +432,14 @@ def test_screen_stops_at_target_in_market_cap_order():
 
 
 def test_screen_excludes_momentum_movers_below_threshold():
-    # FMX/GGB style: unrelated names never enter output regardless of order.
+    # Large moves and high RVOL cannot admit names below the semantic threshold.
     rel = {"169:FMX": 1.0, "169:GGB": 3.0, "185:MU": 4.5}
     llm = ScriptedLLM(rel)
     wf = ThemeWorkflow(llm, FakeQuotes(), {"relevance_batch": 10, "relevance_threshold": 3.3})
     rows = _rows("169:FMX", "169:GGB", "185:MU")
+    rows[0].update({"chg_pct": -40.0, "rvol_event": 8.0, "abnormal_return": -35.0})
+    rows[1].update({"chg_pct": 35.0, "rvol_event": 7.0, "abnormal_return": 30.0})
+    rows[2].update({"chg_pct": 1.0, "rvol_event": 1.0, "abnormal_return": 0.0})
     chosen = wf.screen_until_target(rows, {}, {}, target=8, kind="stocks")
     assert [c["code"] for c in chosen] == ["185:MU"]
 
@@ -445,6 +516,34 @@ def test_relevance_prompt_contains_article_context():
                        {"title": "HBM catalyst", "url": "https://article", "text": "Specific HBM evidence"})
     assert "Specific HBM evidence" in llm.user
     assert "primary reasoning material" in llm.user
+
+
+def test_bearish_relevance_prompt_targets_direct_downside_not_generic_hedges():
+    class BearishPromptLLM:
+        def chat_json(self, system, user, **kw):
+            self.system = system
+            self.user = user
+            return [
+                {"market_code": "185:NVDA", "ai_relevance": 5,
+                 "exposure_type": "direct", "confidence": 0.9,
+                 "reason": "AI demand slowdown pressures accelerator revenue"},
+                {"market_code": "185:CME", "ai_relevance": 1,
+                 "exposure_type": "unclear", "confidence": 0.9,
+                 "reason": "Generic volatility beneficiary lacks direct downside"},
+            ]
+
+    llm = BearishPromptLLM()
+    scores = ThemeWorkflow(llm, FakeQuotes()).score_relevance(
+        {"theme_direction": "bearish", "thesis": "AI valuations may de-rate."},
+        [{"code": "185:NVDA", "name": "NVIDIA"},
+         {"code": "185:CME", "name": "CME Group"}],
+        {"title": "AI bubble warning", "text": "AI spending and valuations are vulnerable."},
+    )
+
+    assert scores["185:NVDA"]["ai_relevance"] == 5
+    assert scores["185:CME"]["ai_relevance"] == 1
+    assert "generic hedges, brokers, miners" in llm.system
+    assert '"theme_direction": "bearish"' in llm.user
 
 
 def test_score_relevance_handles_wrapped_json_and_code_variants():
@@ -606,7 +705,7 @@ def test_internal_narrative_is_rejected_and_uses_safe_stock_fallback():
     assert rationale["type"] == "multilingual"
     assert "relevance" not in rationale["en"].lower()
     assert "ai_relevance" not in rationale["en"]
-    assert "HBM products" in rationale["en"]
+    assert "product or business-segment exposure" in rationale["en"]
     assert "内部评分" not in rationale["zh"]
     assert "现有资料" in rationale["zh"]
     assert ThemeWorkflow._validated_rationale_text(
@@ -624,6 +723,191 @@ def test_internal_narrative_is_rejected_and_uses_safe_stock_fallback():
     }) is None
 
 
+def test_rationale_rejects_selection_fit_and_method_language():
+    safe_en = "Micron supplies HBM used in AI accelerators, while financial materiality is unquantified."
+    safe_zh = "美光供应用于人工智能加速器的高带宽存储，但其财务重要性尚未量化。"
+    for text in (
+        "Micron aligns with the theme through HBM.",
+        "Micron aligns to the theme through HBM.",
+        "Micron is a fit for the theme through HBM.",
+        "After identifying Micron, the HBM business was reviewed.",
+        "Micron is a qualifying name.",
+        "Micron has strong alignment with the theme.",
+        "Micron is a thematic match.",
+        "Following identification, Micron's HBM business was reviewed.",
+        "Micron was selected after evaluation of its HBM business.",
+        "Micron matches the theme because it supplies HBM.",
+    ):
+        assert ThemeWorkflow._validated_theme_rationale({
+            "type": "multilingual", "en": text, "zh": safe_zh}) is None
+    for text in (
+        "美光的HBM业务契合本主题。",
+        "美光的HBM业务符合这一主题。",
+        "美光的HBM业务与该主题契合。",
+        "美光的HBM业务契合了本主题。",
+        "美光经过筛选后入选。",
+        "美光被识别为相关公司。",
+    ):
+        assert ThemeWorkflow._validated_theme_rationale({
+            "type": "multilingual", "en": safe_en, "zh": text}) is None
+
+
+def test_inverse_etf_record_and_fallback_are_objective_and_risk_explicit():
+    candidate = {
+        "code": "185:NVDQ",
+        "name": "Daily 2X Short NVDA ETF",
+        "static_theme_exposure": 0.8,
+        "direction": "Short",
+        "leverage": 2,
+        "benchmark": "185:NVDA",
+        "mandate": "Seek twice the inverse of NVDA's daily return",
+        "selection_criteria": "Daily inverse exposure to the reference security",
+        "related_stock_codes": {"185:NVDA"},
+        "single_stock_inverse": True,
+        "is_inverse": True,
+        "matched_holdings": [],
+    }
+    record = ThemeWorkflow._narrative_record(candidate, "ETF")
+    rationale = ThemeWorkflow._fallback_theme_rationale(candidate)
+
+    assert record["fund direction"] == "Short"
+    assert record["daily leverage multiple"] == 2
+    assert record["related underlying securities"] == ["NVDA"]
+    assert record["single-underlying inverse mandate"] is True
+    assert record["fund mandate"] == "Seek twice the inverse of NVDA's daily return"
+    assert record["reference benchmark"] == "185:NVDA"
+    assert record["index construction facts"] == "Daily inverse exposure to the reference security"
+    assert "daily reset" in rationale["en"].lower()
+    assert "compounding" in rationale["en"].lower()
+    assert "path dependence" in rationale["en"].lower()
+    assert "concentration risk" in rationale["en"].lower()
+    assert "每日重置" in rationale["zh"]
+    assert "路径依赖" in rationale["zh"]
+    assert ThemeWorkflow._validated_candidate_rationale(candidate, rationale) == rationale
+
+
+def test_bearish_fallbacks_preserve_downside_pathways_in_both_languages():
+    stock = {
+        "code": "185:NVDA", "name": "NVIDIA",
+        "reason": "Lower AI infrastructure budgets could reduce accelerator demand",
+    }
+    long_etf = {
+        "code": "185:SMH", "name": "Semiconductor ETF",
+        "static_theme_exposure": 0.4, "direction": "Long",
+        "matched_holdings": [
+            {"code": "185:NVDA", "ticker": "NVDA", "weight_pct": 10.0},
+        ],
+    }
+    stock_rationale = ThemeWorkflow._fallback_theme_rationale(stock, "bearish")
+    etf_rationale = ThemeWorkflow._fallback_theme_rationale(long_etf, "bearish")
+
+    assert "downside" in stock_rationale["en"].lower()
+    assert "下行" in stock_rationale["zh"]
+    assert "Lower AI infrastructure" not in stock_rationale["zh"]
+    assert "declines" in etf_rationale["en"].lower()
+    assert "下跌" in etf_rationale["zh"]
+    assert ThemeWorkflow._validated_theme_rationale(stock_rationale) == stock_rationale
+    assert ThemeWorkflow._validated_theme_rationale(etf_rationale) == etf_rationale
+
+
+def test_sector_inverse_fallback_discloses_concentration_when_supported():
+    candidate = {
+        "code": "185:SOXS", "name": "Semiconductor Bear 3X ETF",
+        "static_theme_exposure": 0.7, "direction": "Short", "leverage": 3,
+        "is_inverse": True, "related_stock_codes": {"185:NVDA"},
+        "pool_labels": ["Semiconductor ETFs"], "matched_holdings": [],
+    }
+    rationale = ThemeWorkflow._fallback_theme_rationale(candidate, "bearish")
+    assert "concentration risk" in rationale["en"].lower()
+    assert "集中度风险" in rationale["zh"]
+    assert "daily return of NVDA" not in rationale["en"]
+
+    niche_only = dict(candidate, pool_labels=[], fund_niche="Semiconductors")
+    niche_rationale = ThemeWorkflow._fallback_theme_rationale(niche_only, "bearish")
+    assert "concentration risk" in niche_rationale["en"].lower()
+
+
+def test_incomplete_inverse_llm_rationale_is_replaced_with_risk_fallback():
+    wf = ThemeWorkflow(FakeLLM(), FakeQuotes())
+    candidate = {
+        "code": "185:NVDQ", "name": "Daily 2X Short NVDA ETF",
+        "static_theme_exposure": 0.8, "direction": "Short", "leverage": 2,
+        "benchmark": "185:NVDA", "single_stock_inverse": True,
+        "is_inverse": True, "matched_holdings": [],
+    }
+    incomplete = {"185:NVDQ": {"theme_rationale": {
+        "type": "multilingual",
+        "en": "The fund seeks 2x daily inverse exposure to NVDA.",
+        "zh": "该基金力求实现NVDA单日收益的2倍反向表现。",
+    }}}
+    (item,) = wf._assemble([candidate], incomplete, "2026-07-09", "bearish")
+    rationale = item["theme_rationale"]
+    assert "daily reset" in rationale["en"].lower()
+    assert "compounding" in rationale["en"].lower()
+    assert "concentration risk" in rationale["en"].lower()
+
+
+def test_inverse_rationale_requires_reference_and_actual_risk_language():
+    wf = ThemeWorkflow(FakeLLM(), FakeQuotes())
+    candidate = {
+        "code": "185:NVDQ", "name": "Daily 2X Short NVDA ETF",
+        "static_theme_exposure": 0.8, "direction": "Short", "leverage": 2,
+        "benchmark": "185:NVDA", "single_stock_inverse": True,
+        "is_inverse": True, "matched_holdings": [],
+    }
+    missing_reference = {"type": "multilingual", "en": (
+        "The fund seeks 2x daily inverse market exposure. Daily reset and compounding "
+        "create path dependence that can make returns differ, while concentration adds risk."
+    ), "zh": (
+        "该基金力求实现2倍单日反向市场敞口。每日重置与复利带来路径依赖，可能使收益产生"
+        "差异，而集中敞口会增加风险。"
+    )}
+    denying_risk = {"type": "multilingual", "en": (
+        "The fund seeks 2x daily inverse exposure to NVDA. Daily reset and compounding "
+        "eliminate path dependence, while concentrated exposure improves targeting without risk."
+    ), "zh": (
+        "该基金力求实现NVDA单日收益的2倍反向表现。每日重置与复利消除路径依赖，"
+        "集中敞口提高针对性且没有风险。"
+    )}
+
+    assert ThemeWorkflow._validated_candidate_rationale(
+        candidate, missing_reference) is None
+    assert ThemeWorkflow._validated_candidate_rationale(candidate, denying_risk) is None
+
+    for unsafe in (missing_reference, denying_risk):
+        (item,) = wf._assemble(
+            [dict(candidate)], {"185:NVDQ": {"theme_rationale": unsafe}},
+            "2026-07-09", "bearish",
+        )
+        assert "NVDA" in item["theme_rationale"]["en"]
+        assert "concentration risk" in item["theme_rationale"]["en"].lower()
+        assert "eliminate" not in item["theme_rationale"]["en"].lower()
+
+
+def test_inverse_fallback_states_when_reference_fact_is_unavailable():
+    candidate = {
+        "code": "185:SECT", "name": "Daily 3X Sector Bear ETF",
+        "static_theme_exposure": 0.7, "direction": "Short", "leverage": 3,
+        "is_inverse": True, "fund_niche": "Semiconductors",
+        "matched_holdings": [],
+    }
+    rationale = ThemeWorkflow._fallback_theme_rationale(candidate, "bearish")
+    assert "do not name its reference benchmark or underlying" in rationale["en"]
+    assert "未列明其参考基准或标的" in rationale["zh"]
+    assert ThemeWorkflow._validated_candidate_rationale(candidate, rationale) == rationale
+
+    invented_reference = {"type": "multilingual", "en": (
+        "The fund seeks 3x daily inverse exposure to the S&P 500. Daily reset and "
+        "compounding create path dependence that can make returns differ, while "
+        "sector concentration adds risk."
+    ), "zh": (
+        "该基金力求实现标普500单日收益的3倍反向表现。每日重置与复利带来路径依赖，"
+        "可能使收益产生差异，而行业集中会增加风险。"
+    )}
+    assert ThemeWorkflow._validated_candidate_rationale(
+        candidate, invented_reference) is None
+
+
 def test_malformed_narrative_response_uses_safe_fallback():
     class MalformedLLM:
         def chat_json(self, system, user, **kw):
@@ -639,8 +923,8 @@ def test_malformed_narrative_response_uses_safe_fallback():
         {"theme": "AI memory"}, {"summary": "", "thesis": ""}, chosen, "stock")
     assert narrative == {}
     (item,) = wf._assemble(chosen, narrative, "2026-07-09")
-    assert "HBM products" in item["theme_rationale"]["en"]
-    assert "现有资料" in item["theme_rationale"]["zh"]
+    assert "product or business-segment exposure" in item["theme_rationale"]["en"]
+    assert "产品或业务分部敞口" in item["theme_rationale"]["zh"]
     assert "why_bullish" not in item
 
 
@@ -684,6 +968,23 @@ def test_add_market_features_skips_names_with_features():
     assert q.kline_calls == []
 
 
+def test_market_strength_uses_absolute_change_and_independent_volume():
+    wf = ThemeWorkflow(FakeLLM(), FakeQuotes(), {"rvol_threshold": 1.5})
+    cands = [
+        {"code": "185:NEG", "chg_pct": -8.0, "rvol_event": 1.0},
+        {"code": "185:POS", "chg_pct": 8.0, "rvol_event": 1.0},
+        {"code": "185:SMALL", "chg_pct": 2.0, "rvol_event": 1.0},
+        {"code": "185:MISSING", "chg_pct": None, "rvol_event": 2.0},
+    ]
+    wf._mark_volume_confirmed(cands)
+
+    assert cands[0]["change_magnitude_percentile"] == cands[1]["change_magnitude_percentile"]
+    assert cands[0]["market_strength"] == cands[1]["market_strength"]
+    assert cands[0]["market_strength"] > cands[2]["market_strength"]
+    assert cands[3]["change_magnitude_percentile"] == 0.0
+    assert cands[3]["market_strength"] == 0.5  # volume contributes independently
+
+
 def test_end_to_end_mocked():
     wf = ThemeWorkflow(FakeLLM(), FakeQuotes(), {"stock_universe": 20, "etf_universe": 20})
 
@@ -706,6 +1007,41 @@ def test_end_to_end_mocked():
         assert all(x["theme_rationale"]["type"] == "multilingual" for x in res[coll])
         assert all(set(x["theme_rationale"]) == {"type", "en", "zh"} for x in res[coll])
         assert all(x["theme_rationale"]["en"] and x["theme_rationale"]["zh"] for x in res[coll])
+
+
+def test_bearish_end_to_end_keeps_direction_and_derivative_facts_internal():
+    class BearishLLM(FakeLLM):
+        def chat_json(self, system, user, **kw):
+            response = super().chat_json(system, user, **kw)
+            if "Return JSON with keys" in user:
+                response["theme_direction"] = "bearish"
+                response["thesis"] = "AI spending and semiconductor valuations may contract."
+            return response
+
+    payload = {
+        "theme": "AI bubble",
+        "date": "2026-07-09",
+        "url": "https://example.com/x",
+        "source_tag": "preserved",
+    }
+    result = ThemeWorkflow(
+        BearishLLM(), FakeQuotes(), {"stock_universe": 20, "etf_universe": 100}
+    ).run(payload)
+    public = _build_output(payload, result)
+    serialized = _serialize_output(public)
+
+    assert result["ThemeEtfs"][0]["market_code"] == "185:SOXS"
+    assert public["source_tag"] == "preserved"
+    assert all(
+        set(item) == {"market_code", "theme_rationale", "Theme exposure"}
+        for section in ("ThemeStocks", "ThemeEtfs")
+        for item in public[section]
+    )
+    for internal in (
+        "theme_direction", "chg_pct", "market_strength", "leverage",
+        "direction", "verified_inverse", "event_date",
+    ):
+        assert f'"{internal}"' not in serialized
 
 
 def test_stock_source_uses_full_ranked_block_and_explicit_sorting():
@@ -817,6 +1153,11 @@ def test_static_theme_pool_routing_is_specific_and_llm_free():
     assert "ai_robotics" not in keys
     assert "robotics" not in keys
     assert match_theme_pools("chairman said demand is strong", {}, "") == []
+    bearish = match_theme_pools(
+        "AI memory", {"keywords": ["HBM", "DRAM"]}, "",
+        max_pools=4, theme_direction="bearish")
+    assert 1 <= len(bearish) <= 4
+    assert bearish[-1].spec.key == "inverse_sp500"
 
 
 def test_pool_only_evidence_is_primary_only_for_direct_asset_funds():
@@ -875,6 +1216,132 @@ def test_etf_preselection_ranks_holdings_before_aum_and_filters_risk():
     assert smh["theme_breadth"] >= 5
     assert smh["relevance_status"] == "deterministic"
     assert "NVDA" in smh["reason"]
+
+
+def test_bearish_etf_preselection_prioritizes_verified_inverse_products():
+    bearish = preselect_etfs(
+        FakeQuotes(), _theme_stocks(), theme="AI memory",
+        brief={"keywords": ["HBM", "DRAM"]}, article_title="AI bubble warning",
+        limit=100, theme_direction="bearish",
+    )
+    codes = [candidate["code"] for candidate in bearish.candidates]
+    soxs = bearish.candidates[0]
+
+    assert codes[0] == "185:SOXS"
+    assert soxs["verified_inverse"] is True
+    assert soxs["is_inverse"] is True
+    assert soxs["leverage"] == 3
+    assert soxs["static_theme_exposure"] == soxs["preselect_score"]
+    assert soxs["preselect_score"] == (
+        0.50 + 0.45 * soxs["base_theme_exposure"]
+        + 0.05 * soxs["normalised_leverage"]
+    )
+    long_fund = next(candidate for candidate in bearish.candidates if not candidate["is_inverse"])
+    assert long_fund["preselect_score"] == 0.45 * long_fund["base_theme_exposure"]
+    assert soxs["preselect_score"] > long_fund["preselect_score"]
+    assert "185:NVDL" not in codes       # leveraged long remains excluded
+    assert "169:NVDY" not in codes       # option-income remains excluded
+    assert "169:FLSP" not in codes       # generic long/short remains excluded
+
+    invalid = preselect_etfs(
+        FakeQuotes(), _theme_stocks(), theme="AI memory",
+        brief={"keywords": ["HBM"]}, article_title="",
+        limit=100, theme_direction="mixed",
+    )
+    assert "185:SOXS" not in [candidate["code"] for candidate in invalid.candidates]
+
+
+def test_bearish_etfs_support_zero_weight_single_stock_and_pool_inverse_evidence():
+    class InverseQuotes:
+        _DATA = {
+            "185:NVDQ": {
+                "name": "Tradr 2X Short NVDA Daily ETF", "aum": 2e9,
+                "leverage": 2, "direction": "Short", "benchmark": "185:NVDA",
+                "fund_niche": "Single Stock",
+            },
+            "169:SH": {
+                "name": "ProShares Short S&P 500", "aum": 1e9,
+                "leverage": 1, "direction": "Short", "benchmark": "S&P 500",
+            },
+            "169:BAD4": {
+                "name": "Four Times Short Market ETF", "aum": 9e9,
+                "benchmark": "S&P 500",
+            },
+            "169:TSLS": {
+                "name": "Daily 2X Short TSLA ETF", "aum": 8e9,
+                "leverage": 2, "direction": "Short",
+            },
+            "169:TESQ": {
+                "name": "T-Rex 2X Inverse Tesla Daily Target ETF", "aum": 7.5e9,
+                "leverage": 2, "direction": "Short",
+            },
+            "169:S095": {
+                "name": "Near-One Short Market ETF", "aum": 7e9,
+                "leverage": 0.95, "direction": "Short", "benchmark": "S&P 500",
+            },
+            "185:L104": {
+                "name": "Near-One Leveraged Long AI ETF", "aum": 6e9,
+                "leverage": 1.04, "direction": "Long", "asset_class": "Equity",
+            },
+            "169:USTD": {
+                "name": "Ultra Short Duration Treasury ETF", "aum": 5e8,
+                "asset_class": "Bonds",
+            },
+            "185:AIQ": {
+                "name": "Artificial Intelligence ETF", "aum": 3e9,
+                "leverage": 1, "direction": "Long", "asset_class": "Equity",
+            },
+        }
+
+        def name_of(self, code):
+            return self._DATA[code]["name"]
+
+        def iter_related_etfs(self, stock_code, *, page_size=100):
+            if stock_code == "185:NVDA":
+                data = self._DATA["185:NVDQ"]
+                yield {"code": "185:NVDQ", "holding_weight": None, **data}
+
+        def iter_prompt_etfs(self, prompt_id, *, page_size=100):
+            if prompt_id == "6908b49e8738843bb3ba8668":
+                codes = (
+                    "169:SH", "169:BAD4", "169:TSLS", "169:TESQ",
+                    "169:S095", "169:USTD",
+                )
+            elif prompt_id == "6908b19b8738843bb3ba8657":
+                # A normal thematic source independently exposes the long fund,
+                # proving that "Short Duration" is not parsed as inverse.
+                codes = ("185:AIQ", "185:L104", "169:USTD")
+            else:
+                codes = ()
+            for code in codes:
+                yield {"code": code, **self._DATA[code]}
+
+        def etf_metadata(self, codes):
+            return {code: dict(self._DATA[code]) for code in codes}
+
+        def etf_holding_weights_for_stock(self, codes, stock_code):
+            return {code: None for code in codes}
+
+    result = preselect_etfs(
+        InverseQuotes(), _theme_stocks()[:1], theme="AI bubble",
+        brief={"keywords": ["artificial intelligence"]}, article_title="Bubble warning",
+        limit=20, theme_direction="bearish",
+    )
+    by_code = {candidate["code"]: candidate for candidate in result.candidates}
+
+    assert result.candidates[0]["code"] == "185:NVDQ"
+    assert by_code["185:NVDQ"]["single_stock_inverse"] is True
+    assert by_code["185:NVDQ"]["theme_weight_pct"] == 0
+    assert "related_stock" in by_code["185:NVDQ"]["inverse_evidence"]
+    assert by_code["169:SH"]["verified_inverse"] is True
+    assert "inverse_sp500_pool" in by_code["169:SH"]["inverse_evidence"]
+    assert "169:BAD4" not in by_code     # leverage above 3x
+    assert "169:TSLS" not in by_code     # name-only unrelated single-stock inverse
+    assert "169:TESQ" not in by_code     # company-name single-stock wrapper
+    assert "169:S095" not in by_code     # below the 1x inverse bound
+    assert "185:L104" not in by_code     # any leveraged-long multiple is excluded
+    assert by_code["169:USTD"]["direction"] == "Long"
+    assert by_code["169:USTD"]["is_inverse"] is False
 
 
 def test_etf_preselection_global_cap_is_identical_for_100_and_1000():

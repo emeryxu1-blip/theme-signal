@@ -20,8 +20,7 @@ LLM semantic analysis (ChatGPT gateway) with live market data (AInvest OpenAPI q
         "en": "English investor-facing theme rationale.",
         "zh": "面向投资者的中文主题逻辑说明。"
       },
-      "Theme exposure": 4.8,
-      "event_date": "2026-07-09"
+      "Theme exposure": 4.8
     }
   ],
   "ThemeEtfs":   [ ... 5 ],
@@ -29,29 +28,33 @@ LLM semantic analysis (ChatGPT gateway) with live market data (AInvest OpenAPI q
 }
 ```
 `Theme exposure` is the only exposed score (1–5). Stock exposure combines the LLM
-business-exposure signals with a small market-confirmation uplift. ETF exposure is calculated
-deterministically from actual matched holding weights, breadth across selected theme stocks,
-and curated-pool membership. Internal calculation fields are not included in `result.json`.
+business-exposure signals with a small, direction-neutral market-strength uplift. ETF exposure is
+calculated deterministically from actual matched holding weights, breadth across theme stocks,
+curated-pool membership, and (for bearish themes) verified inverse exposure. Internal direction,
+price, volume, leverage, and calculation fields are not included in `result.json`.
 `theme_rationale` is a multilingual object containing semantically equivalent English (`en`) and
-Simplified Chinese (`zh`) versions of the security's neutral, evidence-based theme connection,
-financial pathway, supported catalyst, and main limitation. Neither version exposes internal
-scores, rankings, price/volume calculations, or selection mechanics.
+Simplified Chinese (`zh`) versions of the security's factual business, holdings, or mandate facts,
+causal financial pathway, supported catalyst, and main limitation. Neither version exposes
+internal scores, rankings, price/volume calculations, screening mechanics, or thematic-fit claims.
 
 ## Pipeline
 1. **Validate + fetch article** (`article.py`).
-2. **Event brief** — ChatGPT builds a theme taxonomy: direct beneficiaries, picks-and-shovels, second-order, false positives (`prompts.EVENT_BRIEF_*`).
-3. **Finite stock screen** — stocks come from `C191` in descending market-cap order. ChatGPT evaluates business/revenue relevance in batches and stops at eight qualifying stocks or the top-N boundary.
-4. **Deterministic ETF discovery** — static phrase routing selects up to four documented AInvest thematic pools. In parallel, each selected stock expands to the related ETFs that actually hold it. The sources are consumed round-robin and deduplicated until at most N unique candidates exist.
-5. **Deterministic ETF filtering and ranking** — code rejects explicit leveraged, inverse, short, and single-stock wrapper products. For every remaining ETF, the quote API supplies exact weights for every selected stock. Ranking uses relevance-weighted holding exposure first, stock breadth second, curated-pool evidence third, and AUM only as the final investability tie-breaker. ETF candidates are not sent through the LLM relevance prompt.
-6. **Market features (finalists only)** — daily K-lines are fetched **only for the qualifying finalists** to compute internal event-window RVOL, abnormal return vs SPY, and event→today change signals used by the small market-confirmation uplift. These values are not passed to the narrative prompt.
-7. **Theme exposure + narrative + FAQ** — stock and ETF exposure scores are calibrated to differentiated 1–5 display values. ChatGPT writes semantically equivalent English and Simplified-Chinese `theme_rationale` text from business-exposure evidence and raw ETF holding facts; it does not receive internal scores, rankings, or market calculations.
+2. **Directional event brief** — ChatGPT builds the existing theme taxonomy and internally resolves its dominant investable direction to `bullish` or `bearish`. Missing or invalid direction defaults to bullish.
+3. **Finite stock screen** — stocks come from `C191` in descending market-cap order. Bullish briefs score supported upside pathways; bearish briefs score direct demand, revenue, earnings, margin, or valuation vulnerability. Generic hedges and unrelated market movers remain ineligible.
+4. **Deterministic ETF discovery** — static phrase routing selects up to four documented AInvest sources. Bearish runs reserve one source for the inverse S&P 500 pool. In parallel, each theme stock expands to related ETFs, preserving that relationship even when a derivative reports no physical holding weight. Sources are consumed round-robin and deduplicated until at most N unique candidates exist.
+5. **Direction-aware ETF filtering and ranking** — bullish/default runs continue rejecting inverse and leveraged products. Bearish runs may retain verified 1×–3× inverse sector or linked single-stock ETFs. Leveraged-long, option-income, generic long/short, unrelated single-stock, and greater-than-3× products remain excluded. Structured direction and leverage metadata take precedence over explicit name cues. Verified inverse funds rank ahead of bearish long funds, theme specificity dominates leverage, and AUM is the final tie-breaker.
+6. **Market features (finalists only)** — daily K-lines are fetched **only for the already-qualified finalists**. Signed change and abnormal return remain available internally, while the scoring uplift uses a tie-aware percentile of `|Chg %|` separately for stocks and ETFs plus the existing RVOL confirmation. Equal positive and negative moves contribute equally; price action never establishes thematic exposure. These values are not passed to the narrative prompt.
+7. **Theme exposure + narrative + FAQ** — stock and ETF exposure scores receive a market-strength uplift capped at 10%, then calibrate to differentiated 1–5 display values. ChatGPT writes objective, causal English and Simplified-Chinese `theme_rationale` text from business, holdings, benchmark, mandate, direction, leverage, and related-underlying facts. Inverse-fund rationales state the daily objective and reset, compounding, concentration, and path-dependence risks where applicable.
 
 ## Scoring
-For stocks, `Theme exposure` uses `ai_relevance × exposure_type × confidence`, with a
-small volume/price-confirmation uplift. For ETFs, the preselection score uses 80% normalized
-holdings-weighted exposure, 15% breadth, and 5% curated-pool evidence when stock holdings are
-available. Non-equity asset pools use deterministic pool membership. AUM only breaks otherwise
-similar results. Calibration spaces display scores within [1,5].
+For stocks, `Theme exposure` uses `ai_relevance × exposure_type × confidence`. For ETFs, base
+exposure uses 80% normalized holdings-weighted exposure, 15% breadth, and 5% curated-pool
+evidence when stock holdings are available. In bearish mode, verified inverse funds use
+`0.50 + 0.45 × base exposure + 0.05 × normalized leverage`; long funds use
+`0.45 × base exposure`. Non-equity asset pools use deterministic pool membership. Both asset
+classes then receive a maximum 10% uplift composed equally of the `|Chg %|` percentile and RVOL
+confirmation. AUM only breaks otherwise similar results. Calibration spaces display scores
+within [1,5].
 
 ## Run
 From the repository root, enter the workflow directory first:

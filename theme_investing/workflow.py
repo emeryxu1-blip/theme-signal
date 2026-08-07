@@ -2,12 +2,12 @@
 
 Pipeline:
   1. validate input + fetch article
-  2. LLM event brief (theme taxonomy)
-  3. stream stocks by market cap and LLM-score their business exposure
-  4. deterministically derive ETFs from selected-stock holdings and static
-     curated theme pools; filter/rank with factual quote data (not an LLM)
-  5. fetch daily k-lines for the qualifying finalists -> event->today change % + relative volume
-  6. calibrate the LLM theme-exposure scores to diverse 1-5 display values
+  2. LLM event brief (theme taxonomy + internal bullish/bearish direction)
+  3. stream stocks by market cap and LLM-score their directional business exposure
+  4. deterministically derive ETFs from theme-stock relations and static pools;
+     conditionally admit verified 1x-3x inverse products for bearish briefs
+  5. fetch daily k-lines for finalists -> signed facts + |Chg %|/RVOL strength
+  6. apply a bounded market-strength uplift and calibrate diverse 1-5 values
   7. LLM theme rationale + SEO FAQ
 """
 
@@ -102,6 +102,25 @@ _NARRATIVE_INTERNAL_RE = re.compile(
     r"相对成交量|异常收益|加权主题敞口|总主题敞口",
     re.IGNORECASE,
 )
+_NARRATIVE_META_RE = re.compile(
+    r"\b(?:select(?:ed|ing|ion|s)?|identif(?:y|ies|ied|ying|ication)|"
+    r"screen(?:ed|ing|s)?|evaluat(?:e|ed|es|ing|ion)|"
+    r"qualif(?:y|ies|ied|ying|ication)|chosen|candidate)\b|"
+    r"\b(?:method(?:ology)?|criteria|workflow)\b|"
+    r"\b(?:align(?:s|ed|ing)?|fit(?:s|ted|ting)?|match(?:es|ed|ing)?)\s+"
+    r"(?:(?:to|for|with)\s+)?(?:(?:a|the|this)\s+)?theme\b|"
+    r"\b(?:is|are|was|were)\s+(?:a\s+)?(?:good\s+)?fit\s+for\s+"
+    r"(?:the|this)\s+theme\b|"
+    r"\b(?:consistent\s+with|thematically\s+(?:aligned|matched|suited))\b|"
+    r"\b(?:strong\s+)?alignment\s+(?:to|with)\s+(?:the|this)\s+theme\b|"
+    r"\b(?:a\s+)?thematic(?:al)?\s+(?:fit|match|alignment)\b|"
+    r"\btheme\s+(?:fit|match|alignment)\b|"
+    r"(?:筛选|评估|入选|被识别为|识别为|认定为|被选(?:为|中)?|遴选|评判|方法论|工作流程)|"
+    r"(?:契合|符合|匹配|适合)(?:了)?(?:本|该|此|这一|这个|所述)?主题|"
+    r"(?:与|同)?(?:本|该|此|这一|这个|所述)?主题(?:高度|较为|十分|非常|相)?"
+    r"(?:契合|符合|匹配|适配|相符)",
+    re.IGNORECASE,
+)
 _SNAKE_CASE_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _LATIN_RE = re.compile(r"[A-Za-z]")
@@ -126,6 +145,11 @@ def _norm_exposure(v) -> str:
     return v if v in _EXPOSURE_TYPES else "unclear"
 
 
+def _norm_theme_direction(v) -> str:
+    """Only an explicit bearish brief may activate inverse products."""
+    return "bearish" if str(v or "").strip().lower() == "bearish" else "bullish"
+
+
 class ThemeWorkflow:
     def __init__(self, llm: LLMClient, quotes: AInvestClient, opts: dict | None = None):
         self.llm = llm
@@ -139,7 +163,11 @@ class ThemeWorkflow:
             theme=inp["theme"], date=inp["date"], title=art.get("title", ""),
             url=inp["url"], excerpt=art.get("text", "")[:6000],
         )
-        return self.llm.chat_json(prompts.EVENT_BRIEF_SYS, user)
+        brief = self.llm.chat_json(prompts.EVENT_BRIEF_SYS, user)
+        if not isinstance(brief, dict):
+            brief = {}
+        brief["theme_direction"] = _norm_theme_direction(brief.get("theme_direction"))
+        return brief
 
     # -- stage 3 -------------------------------------------------------------
     def _pool_rows(self, pool, indicator_id, req_id, sort_pos):
@@ -311,16 +339,20 @@ class ThemeWorkflow:
     def _assign_theme_exposure(self, chosen: list[dict]) -> None:
         """Order by, then calibrate, the unified headline Theme exposure scores."""
         for c in chosen:
+            market_strength = _clamp_float(
+                c.get("market_strength"), 0.0, 1.0, default=0.0)
             if c.get("static_theme_exposure") is not None:
                 # ETF exposure is factual holdings/pool arithmetic from
                 # etf_preselection.py; do not replace it with an LLM-derived score.
-                c["theme_exposure_raw"] = _clamp_float(
+                base_exposure = _clamp_float(
                     c["static_theme_exposure"], 0.0, 1.0, default=0.0)
+                c["theme_exposure_raw"] = min(
+                    1.0, base_exposure * (1.0 + 0.10 * market_strength))
             else:
                 c["theme_exposure_raw"] = scoring.theme_exposure(
                     c.get("ai_relevance", 1), c.get("exposure_type", "unclear"),
                     c.get("confidence", 0.0),
-                    market_confirm=bool(c.get("market_confirmed")),
+                    market_strength=market_strength,
                 )
         # calibrate_scores expects a descending list; sort so headline scores are
         # monotonic and the emitted list is ranked by Theme exposure.
@@ -336,7 +368,8 @@ class ThemeWorkflow:
         text = str(value or "").strip()
         if not text:
             return None
-        if _NARRATIVE_INTERNAL_RE.search(text) or _SNAKE_CASE_RE.search(text):
+        if (_NARRATIVE_INTERNAL_RE.search(text) or _NARRATIVE_META_RE.search(text)
+                or _SNAKE_CASE_RE.search(text)):
             return None
         return text[:1200]
 
@@ -364,86 +397,427 @@ class ThemeWorkflow:
         return "、".join(values)
 
     @staticmethod
+    def _is_inverse_candidate(candidate: dict) -> bool:
+        direction = str(candidate.get("direction") or "").strip().lower()
+        return bool(
+            candidate.get("is_inverse") or candidate.get("verified_inverse")
+            or candidate.get("inverse_aligned") or direction == "short"
+        )
+
+    @staticmethod
+    def _inverse_concentration_label(candidate: dict) -> str:
+        """Return a factual concentration context, or an empty string."""
+        if candidate.get("single_stock_inverse"):
+            return "single underlying"
+        labels = [
+            str(label).strip()
+            for label in candidate.get("pool_labels", [])
+            if str(label).strip() and "inverse s&p 500" not in str(label).lower()
+        ]
+        if labels:
+            return labels[0]
+        broad_re = re.compile(
+            r"\b(?:broad|large cap|total market|all cap|multi[ -]asset|global|world|"
+            r"s&p 500|nasdaq[ -]?100)\b",
+            re.IGNORECASE,
+        )
+        sector_re = re.compile(
+            r"\b(?:sector|semiconductor|technology|financial|energy|biotech|health"
+            r"care|industrial|materials|utilities|consumer|real estate|communication)\b",
+            re.IGNORECASE,
+        )
+        for key in ("fund_niche", "fund_focus"):
+            value = str(candidate.get(key) or "").strip()
+            if value and sector_re.search(value):
+                return value
+            if (
+                value
+                and value.lower() not in {
+                    "equity", "index", "market", "inverse", "leveraged", "short"
+                }
+                and not broad_re.search(value)
+            ):
+                return value
+        for key in ("benchmark", "index_tracked"):
+            value = str(candidate.get(key) or "").strip()
+            if value and sector_re.search(value):
+                return value
+        return ""
+
+    @staticmethod
+    def _inverse_reference_values(candidate: dict) -> list[str]:
+        """Return only supplied benchmark/underlying names suitable for narration."""
+        benchmark = str(candidate.get("benchmark") or "").strip()
+        if benchmark:
+            return [benchmark.partition(":")[2] if ":" in benchmark else benchmark]
+        tracked_index = str(candidate.get("index_tracked") or "").strip()
+        if tracked_index:
+            return [tracked_index]
+        if not candidate.get("single_stock_inverse"):
+            return []
+        related = candidate.get("related_stock_codes") or []
+        if isinstance(related, str):
+            related = [related]
+        values = []
+        for code in related:
+            ticker = str(code or "").partition(":")[2] or str(code or "")
+            ticker = ticker.strip()
+            if ticker and ticker not in values:
+                values.append(ticker)
+        if values:
+            return values[:1]
+        for holding in candidate.get("matched_holdings", []):
+            ticker = str(
+                holding.get("ticker")
+                or str(holding.get("code") or "").partition(":")[2]
+            ).strip()
+            if ticker:
+                return [ticker]
+        return []
+
+    @staticmethod
     def _multilingual(en: str, zh: str) -> dict:
         return {"type": "multilingual", "en": en, "zh": zh}
 
     @classmethod
-    def _fallback_theme_rationale(cls, candidate: dict) -> dict:
-        """Build bilingual, calculation-free prose when LLM output is absent or unsafe."""
+    def _validated_candidate_rationale(cls, candidate: dict, value) -> dict | None:
+        """Validate public prose, including required inverse-product risk facts."""
+        rationale = cls._validated_theme_rationale(value)
+        if rationale is None or not cls._is_inverse_candidate(candidate):
+            return rationale
+
+        en = rationale["en"].lower()
+        zh = rationale["zh"]
+        required_en = (
+            r"\b(?:daily|one[ -]day)\b",
+            r"\b(?:inverse|short exposure)\b",
+            r"\breset\b",
+            r"\bcompound(?:ing|ed)?\b",
+            r"\bpath[ -]depend(?:ence|ent)\b",
+        )
+        if any(re.search(pattern, en) is None for pattern in required_en):
+            return None
+        if any(term not in zh for term in ("反向", "重置", "复利", "路径依赖")):
+            return None
+        if not ("单日" in zh or "每日" in zh):
+            return None
+
+        denial_en = re.compile(
+            r"\b(?:eliminat\w*|remov\w*|avoid\w*|prevent\w*|neutraliz\w*|"
+            r"harmless|no risk|without risk)\b",
+            re.IGNORECASE,
+        )
+        if denial_en.search(en) or re.search(r"(?:消除|避免|无风险|没有风险|降低风险)", zh):
+            return None
+        path_risk_en = re.compile(
+            r"\bpath[ -]depend(?:ence|ent)\b.{0,100}"
+            r"\b(?:risk|diverg\w*|differ\w*|deviat\w*|loss\w*|volatil\w*)\b|"
+            r"\b(?:risk|diverg\w*|differ\w*|deviat\w*|loss\w*|volatil\w*)\b"
+            r".{0,100}\bpath[ -]depend(?:ence|ent)\b",
+            re.IGNORECASE,
+        )
+        if path_risk_en.search(en) is None:
+            return None
+        if re.search(
+                r"路径依赖.{0,60}(?:风险|偏离|差异|损失|波动)|"
+                r"(?:风险|偏离|差异|损失|波动).{0,60}路径依赖", zh
+        ) is None:
+            return None
+
+        try:
+            multiple = float(candidate.get("leverage"))
+        except (TypeError, ValueError):
+            multiple = 1.0
+        multiple_text = f"{max(1.0, min(3.0, multiple)):g}"
+        if re.search(
+                rf"(?<![\d.]){re.escape(multiple_text)}\s*(?:x|×|times?)(?!\w)", en
+        ) is None:
+            return None
+        if re.search(
+                rf"(?<![\d.]){re.escape(multiple_text)}\s*倍", zh
+        ) is None:
+            return None
+
+        reference_values = cls._inverse_reference_values(candidate)
+        if reference_values:
+            en_flat = re.sub(r"[^a-z0-9]+", "", en.casefold())
+            zh_flat = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", zh.casefold())
+            reference_tokens = [
+                re.sub(r"[^a-z0-9]+", "", value.casefold())
+                for value in reference_values
+            ]
+            if not any(token and token in en_flat for token in reference_tokens):
+                return None
+            if not any(token and token in zh_flat for token in reference_tokens):
+                return None
+        else:
+            if re.search(
+                    r"\b(?:do not|does not|did not)\s+name\b|"
+                    r"\b(?:not supplied|not provided|unavailable|unknown)\b",
+                    en,
+            ) is None or re.search(
+                    r"(?:未列明|未提供|不可用|未知).{0,24}(?:基准|标的)|"
+                    r"(?:基准|标的).{0,24}(?:未列明|未提供|不可用|未知)", zh
+            ) is None:
+                return None
+
+        if cls._inverse_concentration_label(candidate):
+            if re.search(
+                    r"\bconcentrat\w*.{0,40}\brisk\b|\brisk\b.{0,40}\bconcentrat\w*",
+                    en,
+            ) is None or re.search(
+                    r"集中.{0,24}风险|风险.{0,24}集中", zh
+            ) is None:
+                return None
+        return rationale
+
+    @classmethod
+    def _fallback_theme_rationale(
+        cls, candidate: dict, theme_direction: str = "bullish"
+    ) -> dict:
+        """Build bilingual, factual prose when LLM output is absent or unsafe."""
         name = str(candidate.get("name") or candidate.get("code") or "This security").strip()
+        direction_mode = _norm_theme_direction(theme_direction)
         is_etf = candidate.get("static_theme_exposure") is not None
         if is_etf:
-            tickers = []
+            is_inverse = cls._is_inverse_candidate(candidate)
+            holding_tickers = []
             for holding in candidate.get("matched_holdings", []):
                 ticker = str(
                     holding.get("ticker")
                     or str(holding.get("code") or "").partition(":")[2]
                 ).strip()
-                if ticker and ticker not in tickers:
-                    tickers.append(ticker)
-            if tickers:
-                examples = cls._human_join(tickers[:3])
-                examples_zh = cls._human_join_zh(tickers[:3])
+                if ticker and ticker not in holding_tickers:
+                    holding_tickers.append(ticker)
+
+            related = candidate.get("related_stock_codes") or []
+            if isinstance(related, str):
+                related = [related]
+            related_tickers = []
+            for code in related:
+                ticker = str(code or "").partition(":")[2] or str(code or "")
+                ticker = ticker.strip()
+                if ticker and ticker not in related_tickers:
+                    related_tickers.append(ticker)
+
+            benchmark = str(candidate.get("benchmark") or "").strip()
+            benchmark_ticker = benchmark.partition(":")[2] if ":" in benchmark else benchmark
+            tracked_index = str(candidate.get("index_tracked") or "").strip()
+
+            if is_inverse:
+                try:
+                    leverage = float(candidate.get("leverage"))
+                except (TypeError, ValueError):
+                    leverage = 1.0
+                leverage = max(1.0, min(3.0, leverage))
+                multiple = f"{leverage:g}"
+                single_stock = bool(candidate.get("single_stock_inverse"))
+                reference_values = cls._inverse_reference_values(candidate)
+                concentration_label = cls._inverse_concentration_label(candidate)
+                if single_stock:
+                    concentration_en = (
+                        " A single-underlying mandate also creates concentration risk."
+                    )
+                    concentration_zh = "单一标的结构还带来集中度风险。"
+                elif concentration_label:
+                    focus = concentration_label
+                    concentration_en = (
+                        f" Its focus on {focus} also creates concentration risk."
+                    )
+                    concentration_zh = f"其对{focus}的集中配置还带来集中度风险。"
+                else:
+                    concentration_en = ""
+                    concentration_zh = ""
+                if reference_values:
+                    reference = cls._human_join(reference_values)
+                    reference_zh = cls._human_join_zh(reference_values)
+                    objective_en = (
+                        f"{name} seeks approximately {multiple} times the inverse of the daily "
+                        f"return of {reference}."
+                    )
+                    objective_zh = (
+                        f"{name}力求实现{reference_zh}单日收益的约{multiple}倍反向表现。"
+                    )
+                else:
+                    objective_en = (
+                        f"{name} seeks approximately {multiple} times daily inverse performance, "
+                        "but the available fund facts do not name its reference benchmark or underlying."
+                    )
+                    objective_zh = (
+                        f"{name}力求实现约{multiple}倍单日反向表现，但现有基金资料未列明其"
+                        "参考基准或标的。"
+                    )
                 return cls._multilingual(
                     en=(
-                        f"{name} provides a route to the theme through holdings such as {examples}. "
-                        "Investors should verify that these positions remain material because fund "
-                        "holdings and portfolio weights can change."
+                        f"{objective_en} Daily reset, compounding, and path dependence can make "
+                        "multi-day performance differ from a simple inverse multiple of the "
+                        f"reference asset's cumulative move.{concentration_en}"
                     ),
                     zh=(
-                        f"{name}通过持有{examples_zh}等标的为投资者提供该主题敞口。"
-                        "鉴于基金持仓及权重可能变化，投资者应持续核实这些持仓是否仍具实质性。"
+                        f"{objective_zh}每日重置、复利和路径依赖可能使其多日表现偏离参考标的"
+                        f"累计涨跌幅的简单反向倍数。{concentration_zh}"
+                    ),
+                )
+
+            if holding_tickers:
+                examples = cls._human_join(holding_tickers[:3])
+                examples_zh = cls._human_join_zh(holding_tickers[:3])
+                if direction_mode == "bearish":
+                    return cls._multilingual(
+                        en=(
+                            f"{name} holds securities such as {examples}. Under the downside "
+                            "thesis, declines in these positions would reduce the fund's net asset "
+                            "value; the sensitivity depends on portfolio weights that can change."
+                        ),
+                        zh=(
+                            f"{name}持有{examples_zh}等证券。在下行情景下，这些持仓下跌会压低"
+                            "基金净值；实际敏感度取决于可能发生变化的组合权重。"
+                        ),
+                    )
+                return cls._multilingual(
+                    en=(
+                        f"{name} holds securities such as {examples}. Its sensitivity depends on "
+                        "their current portfolio weights, which can change as the fund rebalances."
+                    ),
+                    zh=(
+                        f"{name}持有{examples_zh}等证券。其实际敏感度取决于这些证券的当前"
+                        "组合权重，而基金再平衡可能改变相关权重。"
+                    ),
+                )
+            if related_tickers:
+                examples = cls._human_join(related_tickers[:3])
+                examples_zh = cls._human_join_zh(related_tickers[:3])
+                return cls._multilingual(
+                    en=(
+                        f"{name} has a reported relationship to securities such as {examples}, but "
+                        "no physical holding weight is available. The mandate and benchmark "
+                        "determine how changes in those securities affect the fund."
+                    ),
+                    zh=(
+                        f"{name}与{examples_zh}等证券存在已披露关联，但未提供该关联的"
+                        "实物持仓权重。相关证券的变动如何影响基金取决于其投资范围与参考基准。"
+                    ),
+                )
+            if benchmark_ticker or tracked_index:
+                reference = benchmark_ticker or tracked_index
+                if direction_mode == "bearish":
+                    return cls._multilingual(
+                        en=(
+                            f"{name} references {reference}. Under the downside thesis, a long "
+                            "mandate would lose value when that reference declines; tracking and "
+                            "portfolio differences can change the magnitude."
+                        ),
+                        zh=(
+                            f"{name}以{reference}为参考。若下行逻辑兑现，多头基金会在该基准"
+                            "下跌时损失价值；跟踪方式与组合差异可能改变实际幅度。"
+                        ),
+                    )
+                return cls._multilingual(
+                    en=(
+                        f"{name} references {reference}. Its return sensitivity depends on the "
+                        "mandate, tracking method, and current portfolio."
+                    ),
+                    zh=(
+                        f"{name}以{reference}为参考，其收益敏感度取决于投资范围、跟踪方式"
+                        "与最新组合。"
                     ),
                 )
             categories = [str(v).strip() for v in candidate.get("pool_labels", []) if str(v).strip()]
             if categories:
                 category_text = cls._human_join(categories[:2])
                 category_text_zh = cls._human_join_zh(categories[:2])
+                if direction_mode == "bearish":
+                    return cls._multilingual(
+                        en=(
+                            f"{name}'s fund categories include {category_text}. A long mandate can "
+                            "lose value when assets affected by the downside thesis decline, while "
+                            "current holdings determine the magnitude of that sensitivity."
+                        ),
+                        zh=(
+                            f"{name}的基金类别包括{category_text_zh}。当受下行逻辑影响的资产"
+                            "下跌时，多头基金可能损失价值，具体敏感度取决于最新持仓。"
+                        ),
+                    )
                 return cls._multilingual(
                     en=(
-                        f"{name} is associated with {category_text}, providing a fund-level route "
-                        "to the theme. Investors should verify the current holdings and mandate "
-                        "because category membership alone may not provide concentrated exposure."
+                        f"{name}'s fund categories include {category_text}. Category labels alone do "
+                        "not establish concentrated exposure; current holdings and the mandate "
+                        "determine the fund's actual sensitivity."
                     ),
                     zh=(
-                        f"{name}被归入{category_text_zh}，可作为基金层面的主题配置工具。"
-                        "但类别归属本身并不代表敞口集中，投资者仍应核实其最新持仓与投资范围。"
+                        f"{name}的基金类别包括{category_text_zh}。类别标签本身不能证明敞口"
+                        "集中度，实际敏感度取决于最新持仓与基金投资范围。"
+                    ),
+                )
+            if direction_mode == "bearish":
+                return cls._multilingual(
+                    en=(
+                        f"Available fund data does not establish concentrated exposure for {name}. "
+                        "As a long fund, its downside sensitivity depends on the current mandate "
+                        "and holdings, which remain the principal limitation in the available data."
+                    ),
+                    zh=(
+                        f"现有基金资料无法确认{name}是否具有集中敞口。作为多头基金，其下行"
+                        "敏感度取决于最新投资范围与持仓，而现有资料在这两方面仍有限。"
                     ),
                 )
             return cls._multilingual(
                 en=(
-                    f"{name} may provide fund-level access to the theme, but the available evidence "
-                    "does not establish how concentrated that exposure is. Review the fund's current "
-                    "holdings and mandate before treating it as a targeted vehicle."
+                    f"Available fund data does not establish concentrated exposure for {name}. "
+                    "Its current holdings and mandate determine its sensitivity to the affected assets."
                 ),
                 zh=(
-                    f"{name}可能提供基金层面的主题配置渠道，但现有证据无法确认其敞口集中度。"
-                    "在将其视为针对性工具前，应核查基金的最新持仓与投资范围。"
+                    f"现有基金资料无法确认{name}是否具有集中敞口，其对相关资产的实际敏感度"
+                    "取决于最新持仓与基金投资范围。"
                 ),
             )
 
         evidence = str(candidate.get("reason") or "").strip().rstrip(".")
         if cls._validated_rationale_text(evidence):
+            if direction_mode == "bearish":
+                return cls._multilingual(
+                    en=(
+                        f"{name} has reported product or business-segment exposure to the affected "
+                        "market. If the downside pathway develops as described, that exposure could "
+                        "pressure demand, revenue, earnings, margins, or valuation; available "
+                        "disclosures do not quantify the sensitivity."
+                    ),
+                    zh=(
+                        f"{name}在受影响市场拥有已披露的产品或业务分部敞口。若所述下行路径"
+                        "兑现，该敞口可能对需求、收入、盈利、利润率或估值形成压力；现有资料"
+                        "尚未量化敏感度。"
+                    ),
+                )
             return cls._multilingual(
                 en=(
-                    f"{name}'s connection to the theme is supported by {evidence}. The available "
-                    "evidence does not quantify the potential revenue or earnings contribution, so "
-                    "investors should monitor segment-level disclosures."
+                    f"{name} has reported product or business-segment exposure to the affected "
+                    "market. Changes in demand could affect revenue, earnings, margins, or "
+                    "valuation, while available disclosures do not quantify the sensitivity."
                 ),
                 zh=(
-                    f"{name}与该主题的业务联系基于以下证据：{evidence}。"
-                    "现有资料尚未量化其对收入或盈利的潜在贡献，投资者应关注分部层面的后续披露。"
+                    f"{name}在受影响市场拥有已披露的产品或业务分部敞口。需求变化可能影响"
+                    "收入、盈利、利润率或估值，但现有资料尚未量化敏感度。"
+                ),
+            )
+        if direction_mode == "bearish":
+            return cls._multilingual(
+                en=(
+                    f"Available evidence does not establish a specific downside pathway through a "
+                    f"product or segment for {name}. Financial sensitivity remains unverified."
+                ),
+                zh=(
+                    f"现有资料尚未建立{name}通过具体产品或业务分部承受下行影响的路径，"
+                    "其财务敏感度仍未得到验证。"
                 ),
             )
         return cls._multilingual(
             en=(
-                f"{name} was identified as a potential beneficiary, but the available evidence does "
-                "not establish a specific product or segment link. Investors should confirm the "
-                "revenue pathway and financial materiality before treating it as a theme exposure."
+                f"Available evidence does not establish a specific product or segment link for {name}. "
+                "The revenue pathway and financial materiality remain unverified."
             ),
             zh=(
-                f"{name}被识别为潜在受益标的，但现有证据尚未建立具体的产品或业务分部联系。"
-                "在将其视为主题标的前，投资者应确认收入传导路径及其财务重要性。"
+                f"现有资料尚未建立{name}与具体产品或业务分部的联系，收入传导路径及财务"
+                "重要性仍未得到验证。"
             ),
         )
 
@@ -477,8 +851,51 @@ class ThemeWorkflow:
         if holdings:
             record["relevant holdings"] = holdings
 
+        direction = str(candidate.get("direction") or "").strip()
+        if direction:
+            record["fund direction"] = direction
+        try:
+            leverage = float(candidate.get("leverage"))
+        except (TypeError, ValueError):
+            leverage = None
+        if leverage is not None:
+            record["daily leverage multiple"] = leverage
+
+        related = candidate.get("related_stock_codes") or []
+        if isinstance(related, str):
+            related = [related]
+        related_tickers = []
+        for code in related:
+            ticker = str(code or "").partition(":")[2] or str(code or "")
+            ticker = ticker.strip()
+            if ticker and ticker not in related_tickers:
+                related_tickers.append(ticker)
+        if related_tickers:
+            record["related underlying securities"] = related_tickers
+
+        if candidate.get("single_stock_inverse"):
+            record["single-underlying inverse mandate"] = True
+
+        mandates = []
+        for key in ("mandate", "investment_objective", "fund_strategy"):
+            value = str(candidate.get(key) or "").strip()
+            if value and value not in mandates:
+                mandates.append(value)
+        if mandates:
+            record["fund mandate"] = mandates[0] if len(mandates) == 1 else mandates
+
+        benchmark = str(candidate.get("benchmark") or "").strip()
+        if benchmark:
+            record["reference benchmark"] = benchmark
+        tracked_index = str(candidate.get("index_tracked") or "").strip()
+        if tracked_index:
+            record["tracked index"] = tracked_index
+        index_construction = str(candidate.get("selection_criteria") or "").strip()
+        if index_construction:
+            record["index construction facts"] = index_construction
+
         fund_context = []
-        for key in ("fund_focus", "fund_niche", "fund_strategy", "benchmark"):
+        for key in ("fund_focus", "fund_niche"):
             value = str(candidate.get(key) or "").strip()
             if value and value not in fund_context:
                 fund_context.append(value)
@@ -490,14 +907,15 @@ class ThemeWorkflow:
             record["theme categories"] = categories
         return record
 
-    def _assemble(self, chosen, narr, event_date):
+    def _assemble(self, chosen, narr, event_date, theme_direction="bullish"):
         self._assign_theme_exposure(chosen)
         items = []
         for c in chosen:
             n = narr.get(c["code"], {})
-            rationale = self._validated_theme_rationale(n.get("theme_rationale"))
+            rationale = self._validated_candidate_rationale(
+                c, n.get("theme_rationale"))
             if rationale is None:
-                rationale = self._fallback_theme_rationale(c)
+                rationale = self._fallback_theme_rationale(c, theme_direction)
             items.append({
                 "market_code": c["code"],
                 "theme_rationale": rationale,
@@ -512,14 +930,17 @@ class ThemeWorkflow:
         return []
 
     def _mark_volume_confirmed(self, cands: list[dict]) -> None:
-        """Attach the internal market-confirmation signal used by theme scoring."""
+        """Attach sign-neutral price-magnitude and volume confirmation signals."""
         thr = self.opts["rvol_threshold"]
-        for c in cands:
+        change_magnitudes = scoring.absolute_percentiles(
+            [c.get("chg_pct") for c in cands])
+        for c, magnitude in zip(cands, change_magnitudes):
             c["volume_confirmed"] = bool(
                 c.get("rvol_event") is not None and c["rvol_event"] >= thr)
-            c["market_confirmed"] = bool(
-                c["volume_confirmed"]
-                and c.get("abnormal_return") is not None and c["abnormal_return"] > 0)
+            c["change_magnitude_percentile"] = magnitude
+            c["market_strength"] = 0.5 * magnitude + 0.5 * float(c["volume_confirmed"])
+            # Retained for internal compatibility; scoring uses market_strength.
+            c["market_confirmed"] = c["market_strength"] > 0
 
     # -- stage 7 -------------------------------------------------------------
     def narrate(self, inp: dict, brief: dict, chosen: list[dict], kind: str) -> dict:
@@ -527,6 +948,7 @@ class ThemeWorkflow:
         user = prompts.NARRATIVE_USER.format(
             theme=inp["theme"], summary=brief.get("summary", ""),
             thesis=brief.get("thesis", ""), as_of=self.as_of,
+            theme_direction=_norm_theme_direction(brief.get("theme_direction")),
             kind=kind, records=json.dumps(records, ensure_ascii=False))
         try:
             arr = self.llm.chat_json(prompts.NARRATIVE_SYS, user)
@@ -535,11 +957,17 @@ class ThemeWorkflow:
         if not isinstance(arr, list):
             arr = []
         output = {}
+        candidate_by_code = {str(candidate.get("code") or ""): candidate for candidate in chosen}
         for obj in arr:
             if not isinstance(obj, dict):
                 continue
             code = str(obj.get("market_code") or "")
-            rationale = self._validated_theme_rationale(obj.get("theme_rationale"))
+            candidate = candidate_by_code.get(code)
+            rationale = (
+                self._validated_candidate_rationale(
+                    candidate, obj.get("theme_rationale"))
+                if candidate is not None else None
+            )
             if not code or rationale is None:
                 if code:
                     _log(f"narrative rejected for {code}; using evidence-only fallback")
@@ -571,7 +999,8 @@ class ThemeWorkflow:
         _log(f"article ok={art['ok']} title={art.get('title','')[:60]!r}")
 
         brief = self.event_brief(inp, art)
-        _log("event brief ready")
+        theme_direction = _norm_theme_direction(brief.get("theme_direction"))
+        _log(f"event brief ready direction={theme_direction}")
 
         # Stocks retain the market-cap-ordered semantic screen.
         top_stocks = self.screen_until_target(
@@ -591,6 +1020,7 @@ class ThemeWorkflow:
             theme=inp["theme"],
             brief=brief,
             article_title=art.get("title", ""),
+            theme_direction=theme_direction,
             limit=etf_cap,
             max_pools=int(self.opts.get("etf_theme_pools", 4)),
             log=_log,
@@ -617,7 +1047,9 @@ class ThemeWorkflow:
         _log("narratives + FAQ ready")
 
         return {
-            "ThemeStocks": self._assemble(top_stocks, stock_narr, inp["date"]),
-            "ThemeEtfs": self._assemble(top_etfs, etf_narr, inp["date"]),
+            "ThemeStocks": self._assemble(
+                top_stocks, stock_narr, inp["date"], theme_direction),
+            "ThemeEtfs": self._assemble(
+                top_etfs, etf_narr, inp["date"], theme_direction),
             "ThemeFAQ": faq,
         }
