@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "theme-signal-archive",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-11",
+  "assets": { "directory": "./public", "binding": "ASSETS", "not_found_handling": "single-page-application" },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "theme-signals",
+    "database_id": "0448d730-70fa-41d3-9c3c-55f48047bd21",
+    "migrations_dir": "migrations"
+  }]
+}
