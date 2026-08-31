@@ -25,6 +25,7 @@ EXPOSURE_WEIGHT = {
     "enabler":      0.90,
     "supply_chain": 0.80,
     "beneficiary":  0.70,
+    "factor_proxy": 0.15,
     "diversified":  0.50,
     "unclear":      0.40,
 }
@@ -325,50 +326,32 @@ def calibrate_scores(
     quality_floor: float = 1.0,
     top_cap: float = 4.8,
 ) -> list[float]:
-    """Map a descending list of composite scores to differentiated display scores.
+    """Map absolute [0,1] exposure scores onto the public [1,5] scale.
 
-    Unlike the previous implementation this function does NOT blindly assign 5.0
-    (or any fixed value) to the top candidate.  Its initial display score derives
-    from the absolute best composite, then is capped at ``top_cap`` (default 4.8)
-    to reserve 5.0 for an explicit future override backed by stronger evidence.
-    Subsequent gaps scale proportionally to the composite spread.
-
-    Guarantees:
-    - Strictly decreasing (each step ≥ ``min_gap`` after rounding).
-    - All values in [``quality_floor``, ``absolute_ceiling``].
-    - The top value never exceeds ``top_cap``.
-    - Exactly ``len(sorted_composites)`` values returned.
+    The prior relative calibration promoted the best member of every list to 4.8
+    and manufactured gaps between evidence ties. This mapping preserves absolute
+    quality and equal evidence; list position cannot inflate a weak candidate.
 
     Parameters
     ----------
     sorted_composites:
         Composite values in descending order (already sorted by caller).
-    min_gap:
-        Minimum display-score step between consecutive candidates.
-    max_gap:
-        Maximum display-score step between consecutive candidates.
+    min_gap, max_gap:
+        Retained compatibility parameters; relative gap fabrication is disabled.
     absolute_ceiling:
         Hard upper bound for any display score (5.0).
     quality_floor:
         Hard lower bound for any display score (1.0).
     top_cap:
-        The top candidate receives at most this score.  Set to 5.0 if you want
-        the old forced-top behaviour.
+        Per-item display cap. It never promotes the list leader; set to 5.0 to
+        permit genuinely maximal absolute evidence to display as 5.0.
     """
-    n = len(sorted_composites)
-    if n == 0:
-        return []
-    if n == 1:
-        return [round(min(top_cap, absolute_ceiling), 1)]
-
-    diffs = [sorted_composites[i - 1] - sorted_composites[i] for i in range(1, n)]
-    max_diff = max(diffs) if diffs else 0.0
-
-    top = min(top_cap, absolute_ceiling)
-    scores = [top]
-    for d in diffs:
-        frac = (d / max_diff) if max_diff > 1e-9 else 0.0
-        gap = min_gap + (max_gap - min_gap) * frac
-        scores.append(scores[-1] - gap)
-
-    return [round(max(quality_floor, min(absolute_ceiling, s)), 1) for s in scores]
+    _ = (min_gap, max_gap)
+    ceiling = min(top_cap, absolute_ceiling)
+    scores = []
+    for raw in sorted_composites:
+        value = _finite_float(raw)
+        value = max(0.0, min(1.0, value if value is not None else 0.0))
+        display = quality_floor + (absolute_ceiling - quality_floor) * value
+        scores.append(round(max(quality_floor, min(ceiling, display)), 1))
+    return scores

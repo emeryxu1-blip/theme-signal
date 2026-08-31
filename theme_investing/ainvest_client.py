@@ -1,14 +1,8 @@
-"""AInvest OpenAPI quote client (snapshot pagination + multi_kline batching).
-
-Uses only the standard library. TLS verification is disabled because the
-corporate proxy in front of the c-side gateway presents a self-signed chain
-(the same reason ``curl -k`` is required on this network).
-"""
+"""AInvest OpenAPI quote client (snapshot pagination + multi_kline batching)."""
 
 from __future__ import annotations
 
 import json
-import ssl
 import time
 import urllib.error
 import urllib.request
@@ -17,17 +11,35 @@ from typing import Iterable
 
 from config import QuoteConfig
 
-_SSL_CTX = ssl._create_unverified_context()
-
 MULTI_KLINE_MAX = 16          # API hard limit: <=16 codes per multi_kline call
 SNAPSHOT_PAGE_MAX = 1000      # API hard limit: page.count <= 1000
 SNAPSHOT_CODE_MAX = 10000     # API hard limit: total explicit input codes <= 10000
 
 RELATED_ETF_PROMPT_ID = "677251bbbc4823684c64145d"
+RELATED_LEVERAGED_ETF_PROMPT_ID = "6762c178784e3a2b800f5bae"
+RELATED_INVERSE_ETF_PROMPT_ID = "6762c196bc4823684c641404"
+RELATED_LONG_ETF_PROMPT_ID = "6762c1ae784e3a2b800f5baf"
+ALL_US_ETF_PROMPT_ID = "6809daea3ed15058a925c378"
+CONCEPT_INDEX_RELATED_ETF_PROMPT_ID = "69285634069a48065f159442"
+
+STOCK_ETF_PROMPT_IDS = {
+    "related": RELATED_ETF_PROMPT_ID,
+    "leveraged": RELATED_LEVERAGED_ETF_PROMPT_ID,
+    "inverse": RELATED_INVERSE_ETF_PROMPT_ID,
+    "long": RELATED_LONG_ETF_PROMPT_ID,
+}
+
 ETF_HOLDING_WEIGHT_ID = "国际北美etf@Holding Stock Weight(View)"
+ETF_COMPONENT_HOLDING_RATIO_ID = "ext_etf_holding_ratio"
 ETF_AUM_ID = "国际北美etf@Assets Under Management(Latest)"
 ETF_LEVERAGE_ID = "国际北美etf@Leverage Ratio"
 ETF_DIRECTION_ID = "国际北美etf@Investment Direction"
+ETF_BENCHMARK_CODE_ID = "国际北美etf@Benchmark HQ Code(AInvest)"
+ETF_SECURITY_CLASS_ID = "ext_metric_security_class"
+ETF_TYPE_ID = "ext_metric_etf_type"
+ETF_INDEX_ETF_CODE_ID = "ext_metric_index_etf_code"
+ETF_INDEX_HOLDING_OVERLAP_ID = "block_etf_holdrate"
+ETF_INDEX_RETURN_SIMILARITY_ID = "block_etf_risekline"
 
 _REFS_DIR = (
     Path(__file__).resolve().parent.parent
@@ -70,7 +82,9 @@ class AInvestClient:
                 request_headers["apikey"] = self.cfg.endpoint_family_credentials["quoteag"]
             req = urllib.request.Request(url, data=data, headers=request_headers, method="POST")
             try:
-                with urllib.request.urlopen(req, timeout=self.timeout, context=_SSL_CTX) as resp:
+                with urllib.request.urlopen(
+                    req, timeout=self.timeout, context=self.cfg.ssl_context()
+                ) as resp:
                     return json.loads(resp.read().decode("utf-8"))
             except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
                 last_err = exc
@@ -112,6 +126,14 @@ class AInvestClient:
             except RuntimeError:
                 if strict:
                     raise
+                break
+            status_code = resp.get("status_code")
+            if status_code not in (None, 0):
+                if strict:
+                    status_msg = resp.get("status_msg") or "unknown snapshot error"
+                    raise RuntimeError(
+                        f"snapshot failed ({status_code}): {status_msg}"
+                    )
                 break
             data = resp.get("data") or {}
             ind_order = [i.get("req_unique_id") for i in (data.get("indicator") or [])]
@@ -159,16 +181,36 @@ class AInvestClient:
             total))
 
     # -- ETF discovery / evidence -------------------------------------------
-    def iter_related_etfs(self, stock_code: str, *, page_size: int = 100):
-        """Yield ETFs containing ``stock_code``, ordered by its portfolio weight.
+    def iter_stock_etfs(
+        self,
+        stock_code: str,
+        relation: str = "related",
+        *,
+        page_size: int = SNAPSHOT_PAGE_MAX,
+    ):
+        """Yield ETFs related to one stock through a documented prompt relation.
 
-        Holding weights are percentage points (for example ``19.99`` means
-        19.99%). Transport failures are surfaced so callers can log an explicit
-        partial-data warning instead of silently treating it as an empty pool.
+        ``relation`` is one of ``related``, ``leveraged``, ``inverse``, or
+        ``long``. Dedicated derivative relations matter because an inverse
+        single-stock wrapper can have no physical holding weight and therefore
+        appear very late in the generic holding-weight-sorted pool.
+
+        Holding weights are percentage points; derivative effective exposure can
+        exceed 100% or be null. Transport failures are surfaced so callers can
+        record partial data instead of silently treating it as an empty pool.
         """
+        relation = str(relation or "").strip().lower()
+        try:
+            prompt_id = STOCK_ETF_PROMPT_IDS[relation]
+        except KeyError as exc:
+            allowed = ", ".join(STOCK_ETF_PROMPT_IDS)
+            raise ValueError(
+                f"unsupported stock ETF relation {relation!r}; expected one of: {allowed}"
+            ) from exc
+
         selector = {
             "type": "prompt_id",
-            "value": [RELATED_ETF_PROMPT_ID],
+            "value": [prompt_id],
             "attr": {"market_code": stock_code},
         }
         indicators = [
@@ -178,6 +220,10 @@ class AInvestClient:
             {"id": ETF_AUM_ID, "req_unique_id": "aum"},
             {"id": ETF_LEVERAGE_ID, "req_unique_id": "leverage"},
             {"id": ETF_DIRECTION_ID, "req_unique_id": "direction"},
+            {"id": ETF_BENCHMARK_CODE_ID, "req_unique_id": "benchmark_code"},
+            {"id": ETF_SECURITY_CLASS_ID, "req_unique_id": "security_class"},
+            {"id": ETF_TYPE_ID, "req_unique_id": "etf_type"},
+            {"id": ETF_INDEX_ETF_CODE_ID, "req_unique_id": "index_etf_code"},
         ]
         for row in self.iter_ranked(
                 selector, indicators, sort_pos=0, page_size=page_size, strict=True):
@@ -189,7 +235,42 @@ class AInvestClient:
                 "aum": values.get("aum"),
                 "leverage": values.get("leverage"),
                 "direction": values.get("direction"),
+                "benchmark_code": values.get("benchmark_code"),
+                "security_class": values.get("security_class"),
+                "etf_type": values.get("etf_type"),
+                "index_etf_code": values.get("index_etf_code"),
+                "stock_relation_kind": relation,
             }
+
+    def iter_related_etfs(self, stock_code: str, *, page_size: int = 100):
+        """Backward-compatible generic stock-to-ETF relation iterator."""
+        yield from self.iter_stock_etfs(
+            stock_code, "related", page_size=page_size
+        )
+
+    def iter_related_leveraged_etfs(
+        self, stock_code: str, *, page_size: int = SNAPSHOT_PAGE_MAX
+    ):
+        """Yield leveraged ETFs related to ``stock_code``."""
+        yield from self.iter_stock_etfs(
+            stock_code, "leveraged", page_size=page_size
+        )
+
+    def iter_related_inverse_etfs(
+        self, stock_code: str, *, page_size: int = SNAPSHOT_PAGE_MAX
+    ):
+        """Yield inverse ETFs related to ``stock_code``."""
+        yield from self.iter_stock_etfs(
+            stock_code, "inverse", page_size=page_size
+        )
+
+    def iter_related_long_etfs(
+        self, stock_code: str, *, page_size: int = SNAPSHOT_PAGE_MAX
+    ):
+        """Yield long ETFs related to ``stock_code``."""
+        yield from self.iter_stock_etfs(
+            stock_code, "long", page_size=page_size
+        )
 
     def iter_prompt_etfs(self, prompt_id: str, *, page_size: int = 100):
         """Yield a curated ETF prompt pool in descending AUM order."""
@@ -199,6 +280,10 @@ class AInvestClient:
             {"id": "55", "req_unique_id": "name"},
             {"id": ETF_LEVERAGE_ID, "req_unique_id": "leverage"},
             {"id": ETF_DIRECTION_ID, "req_unique_id": "direction"},
+            {"id": ETF_BENCHMARK_CODE_ID, "req_unique_id": "benchmark_code"},
+            {"id": ETF_SECURITY_CLASS_ID, "req_unique_id": "security_class"},
+            {"id": ETF_TYPE_ID, "req_unique_id": "etf_type"},
+            {"id": ETF_INDEX_ETF_CODE_ID, "req_unique_id": "index_etf_code"},
         ]
         for row in self.iter_ranked(
                 selector, indicators, sort_pos=0, page_size=page_size, strict=True):
@@ -209,6 +294,96 @@ class AInvestClient:
                 "aum": values.get("aum"),
                 "leverage": values.get("leverage"),
                 "direction": values.get("direction"),
+                "benchmark_code": values.get("benchmark_code"),
+                "security_class": values.get("security_class"),
+                "etf_type": values.get("etf_type"),
+                "index_etf_code": values.get("index_etf_code"),
+            }
+
+    def iter_concept_index_etfs(
+        self, index_code: str, *, page_size: int = 100
+    ):
+        """Yield ETFs linked to one exact AInvest concept index.
+
+        The documented prompt defines relatedness from constituent overlap. The
+        two index-relative metrics are retained as source evidence only; final
+        basket eligibility still comes from independently fetched full holdings.
+        """
+        index_code = str(index_code or "").strip()
+        if not index_code.startswith("89:"):
+            raise ValueError("concept index code must use the 89: market prefix")
+        selector = {
+            "type": "prompt_id",
+            "value": [CONCEPT_INDEX_RELATED_ETF_PROMPT_ID],
+            "attr": {"market_code": index_code},
+        }
+        indicators = [
+            {
+                "id": ETF_INDEX_HOLDING_OVERLAP_ID,
+                "req_unique_id": "block_etf_holdrate",
+                "attr": {"match_code": index_code},
+            },
+            {
+                "id": ETF_INDEX_RETURN_SIMILARITY_ID,
+                "req_unique_id": "block_etf_risekline",
+                "attr": {"match_code": index_code},
+            },
+            {"id": "55", "req_unique_id": "name"},
+            {"id": ETF_AUM_ID, "req_unique_id": "aum"},
+            {"id": ETF_LEVERAGE_ID, "req_unique_id": "leverage"},
+            {"id": ETF_DIRECTION_ID, "req_unique_id": "direction"},
+            {"id": ETF_BENCHMARK_CODE_ID, "req_unique_id": "benchmark_code"},
+            {"id": ETF_SECURITY_CLASS_ID, "req_unique_id": "security_class"},
+            {"id": ETF_TYPE_ID, "req_unique_id": "etf_type"},
+            {"id": ETF_INDEX_ETF_CODE_ID, "req_unique_id": "index_etf_code"},
+        ]
+        for row in self.iter_ranked(
+                selector, indicators, sort_pos=0, page_size=page_size, strict=True):
+            values = row["values"]
+            yield {
+                **row,
+                "name": values.get("name") or self.name_of(row["code"]),
+                "block_etf_holdrate": values.get("block_etf_holdrate"),
+                "block_etf_risekline": values.get("block_etf_risekline"),
+                "aum": values.get("aum"),
+                "leverage": values.get("leverage"),
+                "direction": values.get("direction"),
+                "benchmark_code": values.get("benchmark_code"),
+                "security_class": values.get("security_class"),
+                "etf_type": values.get("etf_type"),
+                "index_etf_code": values.get("index_etf_code"),
+            }
+
+    def iter_etf_holdings(
+        self, etf_code: str, *, page_size: int = SNAPSHOT_PAGE_MAX
+    ):
+        """Yield every reported component of one ETF in descending weight order.
+
+        Holding weights are percentage points. Strict pagination is intentional:
+        callers must be able to distinguish an unavailable portfolio from a real
+        empty response so final eligibility can fail closed.
+        """
+        selector = {
+            "type": "link_code",
+            "value": [etf_code],
+            "attr": {"link_type": "holding"},
+        }
+        indicators = [
+            {
+                "id": ETF_COMPONENT_HOLDING_RATIO_ID,
+                "req_unique_id": "holding_weight",
+                "attr": {"match_code": etf_code},
+            },
+            {"id": "55", "req_unique_id": "name"},
+        ]
+        for row in self.iter_ranked(
+                selector, indicators, sort_pos=0, page_size=page_size, strict=True):
+            values = row["values"]
+            yield {
+                "code": row["code"],
+                "name": values.get("name") or self.name_of(row["code"]),
+                "weight_pct": values.get("holding_weight"),
+                "rank": row["rank"],
             }
 
     @staticmethod
@@ -253,6 +428,21 @@ class AInvestClient:
             for row in self._explicit_snapshot(etf_codes, indicators)
         }
 
+    def security_profiles(self, codes: Iterable[str]) -> dict[str, dict]:
+        """Return compact company facts used for semantic exposure scoring."""
+        indicators = [
+            {"id": "55", "req_unique_id": "name"},
+            {"id": "company_introduction", "req_unique_id": "company_introduction"},
+            {"id": "ext_metric_sector_1_name", "req_unique_id": "sector"},
+            {"id": "ext_metric_sector_3_name", "req_unique_id": "industry"},
+        ]
+        out: dict[str, dict] = {}
+        for row in self._explicit_snapshot(codes, indicators):
+            values = dict(row["values"])
+            values["name"] = values.get("name") or self.name_of(row["code"])
+            out[row["code"]] = values
+        return out
+
     def etf_metadata(self, etf_codes: Iterable[str]) -> dict[str, dict]:
         """Return deterministic ranking/filter metadata for explicit ETF codes."""
         indicators = [
@@ -263,6 +453,10 @@ class AInvestClient:
             {"id": "国际北美etf@Expense Ratio", "req_unique_id": "expense_ratio"},
             {"id": "国际北美etf@Latest Net Fund Flow", "req_unique_id": "net_flow"},
             {"id": "国际北美etf@Benchmark", "req_unique_id": "benchmark"},
+            {"id": ETF_BENCHMARK_CODE_ID, "req_unique_id": "benchmark_code"},
+            {"id": ETF_SECURITY_CLASS_ID, "req_unique_id": "security_class"},
+            {"id": ETF_TYPE_ID, "req_unique_id": "etf_type"},
+            {"id": ETF_INDEX_ETF_CODE_ID, "req_unique_id": "index_etf_code"},
             {"id": "国际北美etf@Asset Class", "req_unique_id": "asset_class"},
             {"id": "fundCategory", "req_unique_id": "fund_category"},
             {"id": "fundFocus", "req_unique_id": "fund_focus"},
@@ -281,6 +475,101 @@ class AInvestClient:
             values["name"] = values.get("name") or self.name_of(row["code"])
             out[row["code"]] = values
         return out
+
+    def iter_relation_codes(
+        self,
+        relation: str,
+        symbol: str,
+        symbol_type: str,
+        *,
+        page_size: int = SNAPSHOT_PAGE_MAX,
+    ):
+        """Yield every code from a paged ``relation_list`` request.
+
+        Live ETF universes, prompt/index components, and plain ETF holding-code
+        lists all share this endpoint shape, so exposing the primitive also gives
+        callers a deterministic fallback building block.
+        """
+        if relation not in {"holding", "component"}:
+            raise ValueError("relation must be 'holding' or 'component'")
+        if symbol_type not in {"market_code", "prompt_id", "block_id", "group_id"}:
+            raise ValueError(
+                "symbol_type must be market_code, prompt_id, block_id, or group_id"
+            )
+        relation_url = getattr(self.cfg, "relation_list_url", None)
+        if not relation_url:
+            raise RuntimeError("relation_list endpoint is not configured")
+
+        page_size = min(max(int(page_size), 1), SNAPSHOT_PAGE_MAX)
+        begin = 0
+        seen: set[str] = set()
+        while True:
+            body = {
+                "relation": relation,
+                "symbol": symbol,
+                "symbol_type": symbol_type,
+                "page": {"begin": begin, "count": page_size},
+            }
+            resp = self._post(relation_url, body)
+            status_code = resp.get("status_code")
+            if status_code not in (None, 0):
+                status_msg = resp.get("status_msg") or "unknown relation-list error"
+                raise RuntimeError(
+                    f"relation_list failed ({status_code}): {status_msg}"
+                )
+
+            data = resp.get("data") or {}
+            page_rows = data.get("data") or []
+            if not page_rows:
+                break
+            new_codes = 0
+            for item in page_rows:
+                code = str(item.get("v") or "").strip()
+                if not code or code in seen:
+                    continue
+                seen.add(code)
+                new_codes += 1
+                yield code
+            if new_codes == 0:
+                break
+
+            begin += len(page_rows)
+            total = (data.get("page") or {}).get("total")
+            if isinstance(total, (int, float)) and begin >= total:
+                break
+            if len(page_rows) < page_size:
+                break
+
+    def iter_live_etf_codes(self, *, page_size: int = SNAPSHOT_PAGE_MAX):
+        """Yield the current live all-US-ETF universe from its prompt relation."""
+        yield from self.iter_relation_codes(
+            "component",
+            ALL_US_ETF_PROMPT_ID,
+            "prompt_id",
+            page_size=page_size,
+        )
+
+    def live_etf_codes(self, *, page_size: int = SNAPSHOT_PAGE_MAX) -> list[str]:
+        """Return the current live all-US-ETF universe, surfacing API failures."""
+        return list(self.iter_live_etf_codes(page_size=page_size))
+
+    def etf_universe_codes(
+        self, *, prefer_live: bool = True, page_size: int = SNAPSHOT_PAGE_MAX
+    ) -> list[str]:
+        """Return ETF codes, falling back to the offline ``CE`` universe.
+
+        Call ``live_etf_codes`` directly when a caller must distinguish a live
+        failure from a genuinely empty universe. This convenience method is for
+        paths where a stale local fallback is preferable to no candidates.
+        """
+        if prefer_live:
+            try:
+                live_codes = self.live_etf_codes(page_size=page_size)
+            except RuntimeError:
+                live_codes = []
+            if live_codes:
+                return live_codes
+        return self.security_codes("CE")
 
     def security_codes(self, security_type: str) -> list[str]:
         """All local market_codes of a given security_type (e.g. ``"CE"`` = ETF).

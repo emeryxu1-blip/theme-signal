@@ -1,8 +1,8 @@
-"""Temporary local Claude adapter.
+"""Optional Anthropic-protocol adapter for explicitly configured profiles.
 
-This file is intentionally separate from llm_client.py. Production continues to
-use the ChatGPT/LiteLLM OpenAI-compatible request method. Select this adapter
-only when env.json active_profiles.llm is set to "local".
+This file is intentionally separate from llm_client.py. The default workflow uses
+the LiteLLM OpenAI-compatible request method. Select this adapter only when the
+chosen env.json profile has ``provider="anthropic"``.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import anthropic
 class LocalClaudeClient:
     def __init__(self, cfg):
         self.cfg = cfg
-        # The local profile targets a LiteLLM proxy (ANTHROPIC_BASE_URL) that
+        # An Anthropic profile may target a LiteLLM proxy (ANTHROPIC_BASE_URL) that
         # authenticates via `Authorization: Bearer <key>`. Passing api_key=
         # would make the SDK send an `x-api-key` header, which the proxy
         # rejects with 401 "No api key passed in"; auth_token sends Bearer.

@@ -1,5 +1,9 @@
 # Local credentials and session state
 Skills/env.json
+Skills/ainvest-password-signing-key.pem
+API-Key-Officewifi/
+.claude/
+.wrangler/
 .env
 .env.*
 !.env.example
@@ -15,6 +19,14 @@ theme_investing/result.json
 theme_investing/result_claude.json
 theme_investing/run.log
 theme_investing/run_claude.log
+
+# Cloudflare/frontend artifacts
+theme_web/node_modules/
+theme_web/.wrangler/
+theme_web/.dev.vars
+theme_web/design-qa.md
+theme_web/test-results/
+theme_web/playwright-report/
 
 # macOS
 .DS_Store

@@ -167,7 +167,11 @@ def import_openpyxl():
 def clean_cell(value):
     if value is None:
         return ""
-    return str(value).strip()
+    text = str(value).strip()
+    # Tangram descriptions sometimes contain spaces before embedded newlines.
+    # They are not request metadata and make tracked CSV refreshes fail the
+    # repository whitespace check, so normalize only line-end padding.
+    return "\n".join(line.rstrip() for line in text.splitlines())
 
 
 def load_rows(path):
@@ -843,7 +847,9 @@ def row_to_outputs(
 def write_csv(path, fieldnames, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        # Generated indexes are tracked in git; force LF so a refresh does not
+        # turn every changed CSV row into trailing-whitespace noise on Unix.
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
