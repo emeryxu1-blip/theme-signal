@@ -19,24 +19,22 @@ const bootData = window.__THEMESIGNAL_BOOT__ || null;
 const VALUE_INVESTMENT_BASE_URL = 'https://value-investment.emery-xu1.workers.dev/value-opportunities';
 const LIGHTWEIGHT_CHARTS_URL = 'https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js';
 const STANDARD_CHART_URL = 'https://cdn.ainvest.com/frontResources/offline/js/standard-chart/compliance-v0.10.6.js';
+const EXPOSURE_POINT_SIZE = 6;
+const EXPOSURE_ACTIVE_SIZE = 14;
+const EXPOSURE_HIT_RADIUS = 22;
+const EXPOSURE_LABEL_SIZE = 11;
 const UI_TEXT = { en: {
   stock: 'Stock', etf: 'ETF', performance: 'Performance',
   performanceSubtitle: 'Equal-weighted average of constituent returns', unableChart: 'Unable to load chart',
   noChartData: 'No chart data available', exposureMap: 'Exposure Map', exposure: 'Theme exposure (1–5)',
   marketCap: 'Market cap', marketCapTable: 'Market cap', aum: 'AUM', symbol: 'Symbol', symbols: 'Symbols',
-  security: 'Security', securities: 'securities', rationale: 'Rationale', details: 'Details',
-  last: 'Last', change: 'Change%', changeSince: '% Chg since', showMore: 'Show More', showLess: 'Show Less',
+  security: 'Security', securities: 'securities', rationale: 'Rationale', sortBy: 'Sort by',
+  last: 'Last', change: 'Change%', changeSince: '% Chg since', since: 'Since',
   themeFaq: 'Theme FAQ', unableData: 'Unable to load data', noData: 'No data available', retry: 'Retry',
   loadingTheme: 'Loading event theme', loadingExposure: 'Loading exposure map',
 } };
 
-const tr = key => {
-  if (key === 'showMore' && language === 'zh-hans') return '查看更多';
-  if (key === 'showLess' && language === 'zh-hans') return '收起';
-  if (key === 'showMore' && language === 'zh-hant') return '顯示更多';
-  if (key === 'showLess' && language === 'zh-hant') return '顯示更少';
-  return UI_TEXT.en[key] || key;
-};
+const tr = key => UI_TEXT.en[key] || key;
 
 let detailModel = null;
 let resizeFrame = 0;
@@ -45,8 +43,8 @@ let lightweightChartsPromise = null;
 let standardChartPromise = null;
 let performanceRuntime = null;
 let performanceRenderToken = 0;
-let bubbleRuntime = null;
-let bubbleRenderToken = 0;
+let exposureScatterRuntime = null;
+let exposureScatterRenderToken = 0;
 
 document.documentElement.lang = language === 'zh-hans' ? 'zh-CN' : language === 'zh-hant' ? 'zh-TW' : 'en';
 
@@ -129,6 +127,13 @@ function formatDate(value, localized = false) {
   return new Intl.DateTimeFormat(localized && language !== 'en' ? 'en-US' : 'en-US', localized && language !== 'en'
     ? { month: '2-digit', day: '2-digit', year: 'numeric', timeZone: 'UTC' }
     : { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date);
+}
+
+function formatCompactDate(value) {
+  if (!value) return '';
+  const date = new Date(`${value}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date);
 }
 
 function formatAxisDate(value, showDay = true) {
@@ -411,7 +416,6 @@ function getPanel(type) {
       quotes: null,
       quotesState: 'idle',
       sort: null,
-      descriptions: new Set(),
     });
   }
   return panelCache.get(key);
@@ -432,23 +436,36 @@ function panelMarkup(type) {
         <div id="performance-plot" class="performance-plot" aria-live="polite">${performanceState === 'loading' || performanceState === 'idle' ? performanceSkeleton() : ''}</div>
       </section>
       <section class="exposure-section">
-        <div class="module-heading"><h2>${esc(tr('exposureMap'))}</h2><p>${esc(`${type === 'etf' ? tr('aum') : tr('marketCap')} and theme exposure`)}</p></div>
-        <div class="bubble-layout">
-          <div class="bubble-y-label">${esc(type === 'etf' ? tr('aum') : tr('marketCap'))}</div>
-          <div id="bubble-plot" class="bubble-plot" aria-live="polite">${panel.exposureState === 'loading' || panel.exposureState === 'idle' ? spinner(tr('loadingExposure')) : ''}</div>
-          <div class="bubble-x-label">${esc(tr('exposure'))}</div>
+        <div class="module-heading" id="exposure-scatter-heading"><h2>${esc(tr('exposureMap'))}</h2><p>${esc(`Farther right = stronger theme exposure · Higher = larger ${type === 'etf' ? tr('aum') : tr('marketCap').toLowerCase()}`)}</p></div>
+        <div class="exposure-scatter-layout">
+          <div class="exposure-scatter-y-label">${esc(type === 'etf' ? tr('aum') : tr('marketCap'))}</div>
+          <div id="exposure-scatter-plot" class="exposure-scatter-plot" role="group" tabindex="0" aria-labelledby="exposure-scatter-heading" aria-describedby="exposure-scatter-help exposure-scatter-status">${panel.exposureState === 'loading' || panel.exposureState === 'idle' ? spinner(tr('loadingExposure')) : ''}</div>
+          <div class="exposure-scatter-x-label">${esc(tr('exposure'))}</div>
         </div>
+        <p id="exposure-scatter-help" class="sr-only">Use the arrow keys to explore securities. Press Enter or Space to pin details, and Escape to clear them.</p>
+        <p id="exposure-scatter-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+        <ol id="exposure-scatter-summary" class="sr-only" data-exposure-summary></ol>
       </section>
     </div>
-    <div id="quote-table-root" class="stock-table-root" aria-live="polite">${panel.quotesState === 'loading' || panel.quotesState === 'idle' ? quoteSkeleton(type) : ''}</div>
+    <span id="quote-table-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></span>
+    <div id="quote-table-root" class="stock-table-root">${panel.quotesState === 'loading' || panel.quotesState === 'idle' ? quoteSkeleton(type) : ''}</div>
   </div>`;
 }
 
 function quoteSkeleton(type) {
   const count = Math.min(Math.max(getSelections(detailModel.data, type).length || 4, 4), 5);
   return `<div class="quote-skeleton" aria-hidden="true">
-    <div class="quote-skeleton-head"><span></span><span></span><span></span><span></span><span></span><span></span></div>
-    ${Array.from({ length: count }, () => `<div class="quote-skeleton-row"><span></span><span></span><span></span><span></span><span></span><span></span></div>`).join('')}
+    <div class="quote-skeleton-heading">
+      <span class="quote-skeleton-title"></span>
+      <div class="quote-skeleton-mobile-sort"><span></span><span></span><span></span></div>
+    </div>
+    <div class="quote-skeleton-frame">
+      <div class="quote-skeleton-head"><span></span><span></span><span></span><span></span></div>
+      ${Array.from({ length: count }, () => `<div class="quote-skeleton-record">
+        <div class="quote-skeleton-row"><span></span><span></span><span></span><span></span></div>
+        <div class="quote-skeleton-rationale"><span></span><span></span></div>
+      </div>`).join('')}
+    </div>
   </div>`;
 }
 
@@ -597,159 +614,496 @@ async function renderPerformanceChart(container, points) {
   }
 }
 
-function bubblePoints(points) {
+function exposureScatterPoints(points, type) {
+  const quoteRows = getPanel(type).quotes?.rows || [];
+  const namesByCode = new Map(quoteRows.map(row => [String(row.marketCode || ''), String(row.name || row.symbol || '')]));
+  const namesBySymbol = new Map(quoteRows.map(row => [String(row.symbol || ticker(row.marketCode)), String(row.name || row.symbol || '')]));
   return (Array.isArray(points) ? points : []).flatMap(point => {
     const exposure = Number(point?.exposure);
     const marketValue = Number(point?.marketValue);
     if (!Number.isFinite(exposure) || exposure < 1 || exposure > 5 || !Number.isFinite(marketValue) || marketValue <= 0) return [];
-    return [{ symbol: String(point.symbol || ''), exposure, marketValue }];
-  });
+    const marketCode = String(point.marketCode || '');
+    const symbol = String(point.symbol || ticker(marketCode));
+    const name = namesByCode.get(marketCode) || namesBySymbol.get(symbol) || symbol;
+    return [{ symbol, name, marketCode, exposure, marketValue }];
+  }).sort((left, right) => left.exposure - right.exposure || right.marketValue - left.marketValue || left.symbol.localeCompare(right.symbol));
 }
 
-function bubbleAxis(maxValue) {
+function exposureScatterAxis(maxValue) {
   const step = niceStep(maxValue, 4);
   return { step, max: Math.max(step, Math.ceil(maxValue / step) * step) };
 }
 
-function overlaps(box, boxes) {
-  return boxes.some(other => box.x < other.x + other.width && box.x + box.width > other.x && box.y < other.y + other.height && box.y + box.height > other.y);
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
-function renderBubbleFallback(container, points, type) {
-  const data = bubblePoints(points);
-  if (!data.length) {
-    container.innerHTML = feedbackState({ title: tr('noChartData'), type: 'empty' });
-    return;
+function boxesOverlap(left, right, gap = 0) {
+  return left.x < right.x + right.width + gap
+    && left.x + left.width + gap > right.x
+    && left.y < right.y + right.height + gap
+    && left.y + left.height + gap > right.y;
+}
+
+function measureExposureLabel(text) {
+  const canvas = measureExposureLabel.canvas || (measureExposureLabel.canvas = document.createElement('canvas'));
+  const context = canvas.getContext('2d');
+  if (context) {
+    context.font = `600 ${EXPOSURE_LABEL_SIZE}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    return Math.ceil(context.measureText(text).width) + 4;
   }
-  const width = Math.max(280, Math.round(container.clientWidth || 280));
-  const height = Math.max(240, Math.round(container.clientHeight || 280));
-  const compact = width < 480;
-  const margin = { top: 32, right: 18, bottom: 30, left: compact ? 52 : 66 };
-  const plotWidth = width - margin.left - margin.right;
-  const plotHeight = height - margin.top - margin.bottom;
-  const axis = bubbleAxis(Math.max(...data.map(point => point.marketValue)));
+  return Math.ceil(String(text).length * EXPOSURE_LABEL_SIZE * .64) + 4;
+}
+
+function exposureScatterGeometry(data, containerWidth, containerHeight) {
+  const width = Math.max(280, Math.round(containerWidth || 280));
+  const height = Math.max(240, Math.round(containerHeight || 260));
+  const margin = { top: 22, right: 18, bottom: 32, left: width < 420 ? 54 : 64 };
+  const plotWidth = Math.max(1, width - margin.left - margin.right);
+  const plotHeight = Math.max(1, height - margin.top - margin.bottom);
+  const axis = exposureScatterAxis(Math.max(...data.map(point => point.marketValue)));
   const x = value => margin.left + (value - 1) / 4 * plotWidth;
   const y = value => margin.top + (axis.max - value) / axis.max * plotHeight;
-  const placedLabels = [];
-  const labels = data.map(point => {
-    const fontSize = compact ? 8 : 11;
-    const horizontalPadding = compact ? 3 : 6;
-    const verticalPadding = compact ? 1 : 4;
-    const labelWidth = Math.max(20, point.symbol.length * fontSize * 0.62 + horizontalPadding * 2);
-    const labelHeight = fontSize + verticalPadding * 2;
-    let labelY = y(point.marketValue) - (compact ? 4 : 8) - labelHeight;
-    const labelX = Math.max(margin.left, Math.min(width - margin.right - labelWidth, x(point.exposure) - labelWidth / 2));
-    let box = { x: labelX, y: labelY, width: labelWidth, height: labelHeight };
-    for (let attempt = 0; attempt < 4 && overlaps(box, placedLabels); attempt += 1) {
-      labelY -= labelHeight + 2;
-      box = { ...box, y: labelY };
+  const marks = data.map(point => ({ x: x(point.exposure), y: y(point.marketValue) }));
+  const placed = [];
+  const labelHeight = 15;
+  const plotBounds = {
+    left: margin.left + 2,
+    right: width - margin.right - 2,
+    top: margin.top + 1,
+    bottom: height - margin.bottom - 1,
+  };
+  const fit = box => ({
+    ...box,
+    x: clampNumber(box.x, plotBounds.left, plotBounds.right - box.width),
+    y: clampNumber(box.y, plotBounds.top, plotBounds.bottom - box.height),
+  });
+  const labels = data.map((point, index) => {
+    const mark = marks[index];
+    const width = measureExposureLabel(point.symbol);
+    const gap = 7;
+    const candidates = [
+      { x: mark.x - width / 2, y: mark.y - gap - labelHeight },
+      { x: mark.x + gap, y: mark.y - gap - labelHeight },
+      { x: mark.x - gap - width, y: mark.y - gap - labelHeight },
+      { x: mark.x + gap, y: mark.y - labelHeight / 2 },
+      { x: mark.x - gap - width, y: mark.y - labelHeight / 2 },
+      { x: mark.x - width / 2, y: mark.y + gap },
+      { x: mark.x + gap, y: mark.y + gap },
+      { x: mark.x - gap - width, y: mark.y + gap },
+    ].map(candidate => fit({ ...candidate, width, height: labelHeight }));
+    const markBoxes = marks.map(other => ({ x: other.x - 5, y: other.y - 5, width: 10, height: 10 }));
+    const available = candidate => !placed.some(other => boxesOverlap(candidate, other, 3))
+      && !markBoxes.some((other, otherIndex) => otherIndex !== index && boxesOverlap(candidate, other, 2));
+    let box = candidates.find(available);
+    if (!box) {
+      const inwardX = mark.x > margin.left + plotWidth / 2
+        ? mark.x - gap - width
+        : mark.x + gap;
+      const rows = [];
+      for (let rowY = plotBounds.top; rowY <= plotBounds.bottom - labelHeight; rowY += labelHeight + 4) {
+        rows.push(fit({ x: inwardX, y: rowY, width, height: labelHeight }));
+      }
+      rows.sort((left, right) => Math.abs((left.y + labelHeight / 2) - mark.y) - Math.abs((right.y + labelHeight / 2) - mark.y));
+      box = rows.find(available);
     }
-    if (overlaps(box, placedLabels) || labelY < 0) return '';
-    placedLabels.push(box);
-    return `<g class="bubble-label-group"><rect x="${labelX}" y="${labelY}" width="${labelWidth}" height="${labelHeight}" rx="${compact ? 4 : 6}"></rect><text x="${labelX + labelWidth / 2}" y="${labelY + verticalPadding + fontSize * 0.78}" style="font-size:${fontSize}px">${esc(point.symbol)}</text></g>`;
+    box ||= candidates.find(candidate => !placed.some(other => boxesOverlap(candidate, other, 1))) || candidates[0];
+    placed.push(box);
+    const endX = clampNumber(mark.x, box.x, box.x + box.width);
+    const endY = clampNumber(mark.y, box.y, box.y + box.height);
+    const leaderDistance = Math.hypot(mark.x - endX, mark.y - endY);
+    return {
+      ...box,
+      textX: box.x + box.width / 2,
+      textY: box.y + box.height / 2,
+      leader: leaderDistance > 8 ? { x1: mark.x, y1: mark.y, x2: endX, y2: endY } : null,
+    };
   });
   const yTicks = [];
   for (let value = 0; value <= axis.max + axis.step / 2; value += axis.step) yTicks.push(value);
-  container.innerHTML = `<svg class="bubble-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Theme exposure versus ${type === 'etf' ? 'AUM' : 'market cap'}">
-    ${[1, 2, 3, 4, 5].map(value => `<g><line x1="${x(value)}" y1="${margin.top}" x2="${x(value)}" y2="${height - margin.bottom}" class="chart-grid-line"></line><text x="${x(value)}" y="${height - 8}" class="bubble-axis-text">${value}</text></g>`).join('')}
-    ${yTicks.map(value => `<g><line x1="${margin.left}" y1="${y(value)}" x2="${width - margin.right}" y2="${y(value)}" class="chart-grid-line"></line><text x="${margin.left - 8}" y="${y(value) + 4}" class="bubble-y-text">${esc(formatMarketScale(value))}</text></g>`).join('')}
-    ${data.map(point => `<circle cx="${x(point.exposure)}" cy="${y(point.marketValue)}" r="${compact ? 3 : 7}" class="bubble-point"><title>${esc(`${point.symbol}\n${type === 'etf' ? 'AUM' : 'Market cap'}: ${formatMarketScale(point.marketValue)}\nTheme exposure (1–5): ${point.exposure.toFixed(1)}/5`)}</title></circle>`).join('')}
-    ${labels.join('')}
-  </svg>`;
+  return { width, height, margin, plotWidth, plotHeight, axis, x, y, marks, labels, yTicks };
+}
+
+function exposureScatterDescription(point, type) {
+  const identity = point.name && point.name !== point.symbol ? `${point.name} (${point.symbol})` : point.symbol;
+  return `${identity}. Theme exposure ${point.exposure.toFixed(1)} out of 5. ${type === 'etf' ? tr('aum') : tr('marketCap')}: ${formatExposureTooltipValue(point.marketValue)}.`;
+}
+
+function renderExposureScatterSummary(data, type) {
+  const summary = $('#exposure-scatter-summary');
+  if (summary) summary.innerHTML = data.map(point => `<li>${esc(exposureScatterDescription(point, type))}</li>`).join('');
+}
+
+function exposureScatterGraphics(geometry, data) {
+  return geometry.labels.flatMap((label, index) => [
+    ...(label.leader ? [{
+      id: `exposure-leader-${index}`,
+      type: 'line',
+      silent: true,
+      z: 2,
+      shape: label.leader,
+      style: { stroke: 'rgba(60,60,67,.34)', lineWidth: 1 },
+    }] : []),
+    {
+      id: `exposure-label-${index}`,
+      type: 'text',
+      silent: true,
+      z: 5,
+      x: label.textX,
+      y: label.textY,
+      style: {
+        text: data[index].symbol,
+        fill: '#1d1d1f',
+        stroke: '#fff',
+        lineWidth: 3,
+        font: `600 ${EXPOSURE_LABEL_SIZE}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`,
+        textAlign: 'center',
+        textVerticalAlign: 'middle',
+      },
+    },
+  ]);
 }
 
 function trimMarketValue(value) {
   return Number(value).toFixed(2).replace(/\.?0+$/, '');
 }
 
-function formatBubbleTooltipValue(value) {
+function formatExposureTooltipValue(value) {
   if (!Number.isFinite(value) || value <= 0) return '$0';
   if (value >= 1000) return `$${trimMarketValue(value / 1000)}T`;
   if (value < 1) return `$${trimMarketValue(value * 1000)}M`;
   return `$${trimMarketValue(value)}B`;
 }
 
-function buildBubbleOption(data, type, compact) {
-  const marketValueLabel = type === 'etf' ? tr('aum') : tr('marketCap');
-  const axis = bubbleAxis(Math.max(...data.map(point => point.marketValue)));
+function buildExposureScatterOption(data, geometry, activeIndex = -1) {
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const active = data[activeIndex];
   return {
     backgroundColor: 'transparent',
-    animation: true,
-    animationDuration: 500,
-    grid: { top: 32, left: 8, right: 20, bottom: 8, containLabel: true },
-    tooltip: {
-      trigger: 'item',
-      renderMode: 'richText',
-      formatter: params => {
-        const point = params?.data;
-        if (!point) return '';
-        return `${marketValueLabel}: ${formatBubbleTooltipValue(point.marketValue)}\n${tr('exposure')}: ${Number(point.exposure).toFixed(1)}/5`;
-      },
+    animation: !reduceMotion,
+    animationDuration: reduceMotion ? 0 : 360,
+    aria: { enabled: false },
+    grid: {
+      top: geometry.margin.top,
+      left: geometry.margin.left,
+      right: geometry.margin.right,
+      bottom: geometry.margin.bottom,
+      containLabel: false,
     },
+    tooltip: { show: false },
     xAxis: {
       type: 'value', min: 1, max: 5, interval: 1,
       axisTick: { show: false }, axisLine: { show: false },
-      splitLine: { lineStyle: { color: 'rgba(0,0,0,.05)', type: 'dashed' } },
-      axisLabel: { color: 'rgba(0,0,0,.6)', fontSize: 11, fontWeight: 600, margin: 10, formatter: value => Number(value).toFixed(0) },
+      splitLine: { lineStyle: { color: 'rgba(0,0,0,.055)', type: 'dashed' } },
+      axisLabel: { color: 'rgba(60,60,67,.72)', fontSize: 11, fontWeight: 500, margin: 10, formatter: value => Number(value).toFixed(0) },
     },
     yAxis: {
-      type: 'value', min: 0, max: axis.max, interval: axis.step,
+      type: 'value', min: 0, max: geometry.axis.max, interval: geometry.axis.step,
       axisTick: { show: false }, axisLine: { show: false },
-      splitLine: { lineStyle: { color: 'rgba(0,0,0,.05)', type: 'dashed' } },
-      axisLabel: { color: 'rgba(0,0,0,.6)', fontSize: 11, fontWeight: 600, margin: 10, formatter: formatMarketScale },
+      splitLine: { lineStyle: { color: 'rgba(0,0,0,.055)', type: 'dashed' } },
+      axisLabel: { color: 'rgba(60,60,67,.72)', fontSize: 11, fontWeight: 500, margin: 10, formatter: formatMarketScale },
     },
-    series: [{
-      type: 'scatter',
-      symbolSize: compact ? 6 : 14,
-      data: data.map(point => ({ ...point, name: point.symbol, value: [point.exposure, point.marketValue] })),
-      itemStyle: { color: '#265ffc', borderColor: '#fff', borderWidth: compact ? 1 : 2 },
-      label: {
-        show: true, position: 'top', distance: compact ? 4 : 8, formatter: '{b}', color: '#000',
-        fontSize: compact ? 8 : 11, fontWeight: 700, backgroundColor: '#fff', borderColor: 'rgba(0,0,0,.1)',
-        borderWidth: 1, borderRadius: compact ? 4 : 6, padding: compact ? [1, 3] : [4, 6],
+    graphic: exposureScatterGraphics(geometry, data),
+    series: [
+      {
+        id: 'exposure-points',
+        name: 'Exposure points',
+        type: 'scatter',
+        silent: true,
+        z: 4,
+        symbol: 'circle',
+        symbolSize: EXPOSURE_POINT_SIZE,
+        data: data.map(point => ({ ...point, name: point.symbol, value: [point.exposure, point.marketValue] })),
+        itemStyle: { color: '#265ffc', borderColor: '#fff', borderWidth: 1 },
+        emphasis: { disabled: true },
       },
-      labelLayout: { hideOverlap: true, moveOverlap: 'shiftY' },
-      emphasis: { focus: 'series' },
-    }],
+      {
+        id: 'exposure-active',
+        name: 'Active exposure point',
+        type: 'scatter',
+        silent: true,
+        z: 6,
+        symbol: 'circle',
+        symbolSize: EXPOSURE_ACTIVE_SIZE,
+        data: active ? [[active.exposure, active.marketValue]] : [],
+        itemStyle: { color: 'rgba(255,255,255,0)', borderColor: '#265ffc', borderWidth: 2 },
+        emphasis: { disabled: true },
+      },
+    ],
   };
 }
 
-function destroyBubbleChart() {
-  bubbleRenderToken += 1;
-  clearTimeout(bubbleRuntime?.resizeTimer);
-  bubbleRuntime?.observer?.disconnect();
-  bubbleRuntime?.chart?.destroy();
-  bubbleRuntime = null;
+function ensureExposureScatterTooltip(runtime) {
+  if (runtime.tooltip?.isConnected) return runtime.tooltip;
+  const tooltip = document.createElement('div');
+  tooltip.className = 'exposure-scatter-tooltip';
+  tooltip.dataset.exposureTooltip = '';
+  tooltip.setAttribute('role', 'tooltip');
+  tooltip.setAttribute('aria-hidden', 'true');
+  tooltip.hidden = true;
+  runtime.container.append(tooltip);
+  runtime.tooltip = tooltip;
+  return tooltip;
 }
 
-async function renderBubbleChart(container, points, type) {
-  const data = bubblePoints(points);
-  destroyBubbleChart();
+function updateExposureScatterActive(runtime) {
+  const point = runtime.data[runtime.activeIndex];
+  if (runtime.echarts) {
+    runtime.echarts.setOption({
+      series: [{
+        id: 'exposure-active',
+        data: point ? [[point.exposure, point.marketValue]] : [],
+      }],
+    }, { lazyUpdate: true });
+  }
+  const ring = $('.exposure-scatter-active-ring', runtime.container);
+  if (ring) {
+    if (point) {
+      const mark = runtime.geometry.marks[runtime.activeIndex];
+      ring.setAttribute('cx', String(mark.x));
+      ring.setAttribute('cy', String(mark.y));
+      ring.removeAttribute('hidden');
+    } else ring.setAttribute('hidden', '');
+  }
+}
+
+function positionExposureScatterTooltip(runtime) {
+  const tooltip = ensureExposureScatterTooltip(runtime);
+  const mark = runtime.geometry.marks[runtime.activeIndex];
+  if (!mark || tooltip.hidden) return;
+  const tooltipWidth = tooltip.offsetWidth || 190;
+  const tooltipHeight = tooltip.offsetHeight || 82;
+  let left = mark.x + 12;
+  if (left + tooltipWidth > runtime.geometry.width - 8) left = mark.x - tooltipWidth - 12;
+  let top = mark.y - tooltipHeight - 12;
+  if (top < 8) top = mark.y + 12;
+  tooltip.style.left = `${clampNumber(left, 8, Math.max(8, runtime.geometry.width - tooltipWidth - 8))}px`;
+  tooltip.style.top = `${clampNumber(top, 8, Math.max(8, runtime.geometry.height - tooltipHeight - 8))}px`;
+}
+
+function showExposureScatterPoint(runtime, index, announce = false) {
+  const point = runtime.data[index];
+  if (!point) return;
+  runtime.activeIndex = index;
+  updateExposureScatterActive(runtime);
+  const tooltip = ensureExposureScatterTooltip(runtime);
+  const marketValueLabel = runtime.type === 'etf' ? tr('aum') : tr('marketCap');
+  tooltip.innerHTML = `<div class="exposure-tooltip-identity"><strong>${esc(point.symbol)}</strong>${point.name && point.name !== point.symbol ? `<span>${esc(point.name)}</span>` : ''}</div>
+    <div class="exposure-tooltip-values"><span>${esc(tr('exposure'))}<strong>${point.exposure.toFixed(1)}/5</strong></span><span>${esc(marketValueLabel)}<strong>${esc(formatExposureTooltipValue(point.marketValue))}</strong></span></div>`;
+  tooltip.hidden = false;
+  tooltip.setAttribute('aria-hidden', 'false');
+  tooltip.classList.toggle('is-pinned', runtime.pinnedIndex === index);
+  positionExposureScatterTooltip(runtime);
+  if (announce) {
+    const status = $('#exposure-scatter-status');
+    if (status) status.textContent = exposureScatterDescription(point, runtime.type);
+  }
+}
+
+function clearExposureScatterPoint(runtime, clearPinned = false) {
+  if (clearPinned) runtime.pinnedIndex = -1;
+  runtime.activeIndex = -1;
+  updateExposureScatterActive(runtime);
+  const tooltip = ensureExposureScatterTooltip(runtime);
+  tooltip.hidden = true;
+  tooltip.setAttribute('aria-hidden', 'true');
+  tooltip.classList.remove('is-pinned');
+}
+
+function nearestExposureScatterPoint(runtime, clientX, clientY) {
+  const box = runtime.container.getBoundingClientRect();
+  const x = (clientX - box.left) * runtime.geometry.width / Math.max(1, box.width);
+  const y = (clientY - box.top) * runtime.geometry.height / Math.max(1, box.height);
+  let nearest = -1;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  runtime.geometry.marks.forEach((mark, index) => {
+    const distance = Math.hypot(mark.x - x, mark.y - y);
+    if (distance < nearestDistance) {
+      nearest = index;
+      nearestDistance = distance;
+    }
+  });
+  return nearestDistance <= EXPOSURE_HIT_RADIUS ? nearest : -1;
+}
+
+function installExposureScatterInteractions(runtime) {
+  const onPointerMove = event => {
+    if (event.pointerType && event.pointerType !== 'mouse' && event.pointerType !== 'pen') return;
+    const index = nearestExposureScatterPoint(runtime, event.clientX, event.clientY);
+    if (index >= 0 && runtime.pinnedIndex < 0) showExposureScatterPoint(runtime, index);
+    else if (index < 0 && runtime.pinnedIndex < 0 && document.activeElement !== runtime.container) clearExposureScatterPoint(runtime);
+  };
+  const onPointerLeave = () => {
+    if (runtime.pinnedIndex >= 0) showExposureScatterPoint(runtime, runtime.pinnedIndex);
+    else if (document.activeElement !== runtime.container) clearExposureScatterPoint(runtime);
+  };
+  const onClick = event => {
+    const index = nearestExposureScatterPoint(runtime, event.clientX, event.clientY);
+    if (index < 0 || runtime.pinnedIndex === index) {
+      clearExposureScatterPoint(runtime, true);
+      return;
+    }
+    runtime.pinnedIndex = index;
+    showExposureScatterPoint(runtime, index, true);
+  };
+  const onFocus = event => {
+    if (event.target === runtime.container && runtime.activeIndex < 0) showExposureScatterPoint(runtime, 0);
+  };
+  const onBlur = () => {
+    if (runtime.pinnedIndex < 0) clearExposureScatterPoint(runtime);
+  };
+  const onKeyDown = event => {
+    const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
+    const backward = event.key === 'ArrowLeft' || event.key === 'ArrowUp';
+    if (forward || backward || event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      const current = runtime.activeIndex < 0 ? 0 : runtime.activeIndex;
+      const index = event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? runtime.data.length - 1
+          : (current + (forward ? 1 : -1) + runtime.data.length) % runtime.data.length;
+      showExposureScatterPoint(runtime, index, true);
+      return;
+    }
+    if ((event.key === 'Enter' || event.key === ' ') && runtime.activeIndex >= 0) {
+      event.preventDefault();
+      runtime.pinnedIndex = runtime.pinnedIndex === runtime.activeIndex ? -1 : runtime.activeIndex;
+      showExposureScatterPoint(runtime, runtime.activeIndex, true);
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      clearExposureScatterPoint(runtime, true);
+    }
+  };
+  const onDocumentPointerDown = event => {
+    if (runtime.pinnedIndex >= 0 && !runtime.container.contains(event.target)) clearExposureScatterPoint(runtime, true);
+  };
+  const onDocumentKeyDown = event => {
+    if (event.key === 'Escape' && runtime.pinnedIndex >= 0 && event.target !== runtime.container) clearExposureScatterPoint(runtime, true);
+  };
+  runtime.container.addEventListener('pointermove', onPointerMove);
+  runtime.container.addEventListener('pointerleave', onPointerLeave);
+  runtime.container.addEventListener('click', onClick);
+  runtime.container.addEventListener('focus', onFocus);
+  runtime.container.addEventListener('blur', onBlur);
+  runtime.container.addEventListener('keydown', onKeyDown);
+  document.addEventListener('pointerdown', onDocumentPointerDown);
+  document.addEventListener('keydown', onDocumentKeyDown);
+  runtime.cleanup = () => {
+    runtime.container.removeEventListener('pointermove', onPointerMove);
+    runtime.container.removeEventListener('pointerleave', onPointerLeave);
+    runtime.container.removeEventListener('click', onClick);
+    runtime.container.removeEventListener('focus', onFocus);
+    runtime.container.removeEventListener('blur', onBlur);
+    runtime.container.removeEventListener('keydown', onKeyDown);
+    document.removeEventListener('pointerdown', onDocumentPointerDown);
+    document.removeEventListener('keydown', onDocumentKeyDown);
+  };
+}
+
+function drawExposureScatterFallback(runtime) {
+  const { container, data, type } = runtime;
+  const geometry = exposureScatterGeometry(data, container.clientWidth, container.clientHeight);
+  runtime.geometry = geometry;
+  container.innerHTML = `<svg class="exposure-scatter-svg" viewBox="0 0 ${geometry.width} ${geometry.height}" aria-hidden="true" focusable="false">
+    ${[1, 2, 3, 4, 5].map(value => `<g><line x1="${geometry.x(value)}" y1="${geometry.margin.top}" x2="${geometry.x(value)}" y2="${geometry.height - geometry.margin.bottom}" class="chart-grid-line"></line><text x="${geometry.x(value)}" y="${geometry.height - 8}" class="exposure-scatter-axis-text">${value}</text></g>`).join('')}
+    ${geometry.yTicks.map(value => `<g><line x1="${geometry.margin.left}" y1="${geometry.y(value)}" x2="${geometry.width - geometry.margin.right}" y2="${geometry.y(value)}" class="chart-grid-line"></line><text x="${geometry.margin.left - 8}" y="${geometry.y(value) + 4}" class="exposure-scatter-y-text">${esc(formatMarketScale(value))}</text></g>`).join('')}
+    ${geometry.labels.flatMap(label => label.leader ? [`<line x1="${label.leader.x1}" y1="${label.leader.y1}" x2="${label.leader.x2}" y2="${label.leader.y2}" class="exposure-scatter-leader"></line>`] : []).join('')}
+    ${data.map((point, index) => `<circle cx="${geometry.marks[index].x}" cy="${geometry.marks[index].y}" r="${EXPOSURE_POINT_SIZE / 2}" class="exposure-scatter-point" data-exposure-marker data-market-code="${esc(point.marketCode)}"><title>${esc(exposureScatterDescription(point, type))}</title></circle>`).join('')}
+    <circle cx="0" cy="0" r="${EXPOSURE_ACTIVE_SIZE / 2}" class="exposure-scatter-active-ring" hidden></circle>
+    ${data.map((point, index) => `<text x="${geometry.labels[index].textX}" y="${geometry.labels[index].textY}" class="exposure-scatter-label" data-exposure-label="${esc(point.symbol)}">${esc(point.symbol)}</text>`).join('')}
+  </svg>`;
+  ensureExposureScatterTooltip(runtime);
+  updateExposureScatterActive(runtime);
+  if (runtime.activeIndex >= 0) showExposureScatterPoint(runtime, runtime.activeIndex);
+}
+
+function destroyExposureScatter() {
+  exposureScatterRenderToken += 1;
+  clearTimeout(exposureScatterRuntime?.resizeTimer);
+  exposureScatterRuntime?.observer?.disconnect();
+  exposureScatterRuntime?.cleanup?.();
+  exposureScatterRuntime?.chart?.destroy();
+  exposureScatterRuntime = null;
+}
+
+async function renderExposureScatter(container, points, type) {
+  const data = exposureScatterPoints(points, type);
+  destroyExposureScatter();
   container.replaceChildren();
+  renderExposureScatterSummary(data, type);
+  const status = $('#exposure-scatter-status');
+  if (status) status.textContent = '';
   if (!data.length) {
+    container.removeAttribute('tabindex');
     container.innerHTML = feedbackState({ title: tr('noChartData'), type: 'empty' });
     return;
   }
-  const token = ++bubbleRenderToken;
+  container.tabIndex = 0;
+  const token = ++exposureScatterRenderToken;
+  let chart = null;
   try {
     const library = await ensureStandardChart();
-    if (token !== bubbleRenderToken || !container.isConnected) return;
-    const chart = library.init(container, null, { renderer: 'svg' });
-    chart.on('dv:afterinit', () => chart.getECharts()?.resize());
-    chart.play({ option: buildBubbleOption(data, type, container.clientWidth < 480) });
-    let resizeTimer = 0;
-    const observer = new ResizeObserver(entries => {
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => {
-        chart.getECharts()?.resize();
-        chart.play({ option: buildBubbleOption(data, type, (entries[0]?.contentRect.width || container.clientWidth) < 480) });
-      }, 500);
-      if (bubbleRuntime?.chart === chart) bubbleRuntime.resizeTimer = resizeTimer;
+    if (token !== exposureScatterRenderToken || !container.isConnected) return;
+    chart = library.init(container, null, { renderer: 'svg' });
+    const runtime = {
+      kind: 'chart', chart, echarts: null, observer: null, cleanup: null, tooltip: null,
+      container, data, type, geometry: exposureScatterGeometry(data, container.clientWidth, container.clientHeight),
+      activeIndex: -1, pinnedIndex: -1, resizeTimer: 0,
+    };
+    exposureScatterRuntime = runtime;
+    const syncEngine = () => {
+      if (exposureScatterRuntime !== runtime) return;
+      runtime.echarts = chart.getECharts?.() || runtime.echarts;
+      runtime.echarts?.resize();
+      updateExposureScatterActive(runtime);
+    };
+    chart.on('dv:afterinit', syncEngine);
+    chart.play({
+      option: buildExposureScatterOption(data, runtime.geometry, runtime.activeIndex),
+      opts: { replaceMerge: ['graphic', 'series'] },
+    });
+    ensureExposureScatterTooltip(runtime);
+    installExposureScatterInteractions(runtime);
+    requestAnimationFrame(syncEngine);
+    const observer = new ResizeObserver(() => {
+      clearTimeout(runtime.resizeTimer);
+      runtime.resizeTimer = setTimeout(() => {
+        if (exposureScatterRuntime !== runtime) return;
+        runtime.geometry = exposureScatterGeometry(data, container.clientWidth, container.clientHeight);
+        chart.getECharts?.()?.resize();
+        chart.play({
+          option: buildExposureScatterOption(data, runtime.geometry, runtime.activeIndex),
+          opts: { replaceMerge: ['graphic', 'series'] },
+        });
+        ensureExposureScatterTooltip(runtime);
+        requestAnimationFrame(syncEngine);
+        if (runtime.activeIndex >= 0) positionExposureScatterTooltip(runtime);
+      }, 180);
     });
     observer.observe(container);
-    bubbleRuntime = { chart, observer, container, resizeTimer };
+    runtime.observer = observer;
   } catch {
-    if (token === bubbleRenderToken && container.isConnected) renderBubbleFallback(container, data, type);
+    chart?.destroy?.();
+    if (token !== exposureScatterRenderToken || !container.isConnected) return;
+    const runtime = {
+      kind: 'fallback', chart: null, echarts: null, observer: null, cleanup: null, tooltip: null,
+      container, data, type, geometry: exposureScatterGeometry(data, container.clientWidth, container.clientHeight),
+      activeIndex: -1, pinnedIndex: -1, resizeTimer: 0,
+    };
+    exposureScatterRuntime = runtime;
+    drawExposureScatterFallback(runtime);
+    installExposureScatterInteractions(runtime);
+    const observer = new ResizeObserver(() => {
+      clearTimeout(runtime.resizeTimer);
+      runtime.resizeTimer = setTimeout(() => {
+        if (exposureScatterRuntime === runtime) drawExposureScatterFallback(runtime);
+      }, 180);
+    });
+    observer.observe(container);
+    runtime.observer = observer;
   }
 }
 
@@ -781,11 +1135,18 @@ function symbolLogoUrl(row, type) {
     : `https://cdn.ainvest.com/icon/us/${code}.png`;
 }
 
-function sortHeader(panel, key, label) {
+function sortHeader(panel, key, label, location = 'desktop') {
   const active = panel.sort?.key === key;
   const order = active ? panel.sort.order : '';
   const symbol = order === 'asc' ? '↑' : order === 'desc' ? '↓' : '↕';
-  return `<button type="button" class="sort-header${active ? ' active' : ''}" data-sort="${key}" aria-label="Sort by ${esc(label)}${order ? ` ${order}` : ''}">${esc(label)} <span aria-hidden="true">${symbol}</span></button>`;
+  return `<button type="button" class="sort-header${active ? ' active' : ''}" data-sort="${key}" data-sort-location="${location}" aria-label="${esc(tr('sortBy'))} ${esc(label)}${order ? ` ${order}` : ''}">${esc(label)} <span aria-hidden="true">${symbol}</span></button>`;
+}
+
+function mobileSortButton(panel, key, label, accessibleLabel = label) {
+  const active = panel.sort?.key === key;
+  const order = active ? panel.sort.order : '';
+  const symbol = order === 'asc' ? '↑' : order === 'desc' ? '↓' : '↕';
+  return `<button type="button" class="mobile-sort-button${active ? ' active' : ''}" data-sort="${key}" data-sort-location="mobile" aria-pressed="${active}" aria-label="${esc(tr('sortBy'))} ${esc(accessibleLabel)}${order ? ` ${order}` : ''}">${esc(label)} <span aria-hidden="true">${symbol}</span></button>`;
 }
 
 function sortDirection(panel, key) {
@@ -822,44 +1183,51 @@ function quoteTable(rows, type) {
   });
   const sorted = sortRows(mergedRows, panel.sort);
   const changeLabel = detailModel.data.date ? `${tr('changeSince')} ${formatDate(detailModel.data.date, true)}` : tr('change');
-  const valueLabel = tr('marketCapTable');
+  const compactChangeLabel = detailModel.data.date ? `${tr('since')} ${formatCompactDate(detailModel.data.date)}` : tr('change');
+  const valueLabel = type === 'etf' ? tr('aum') : tr('marketCapTable');
   if (!sorted.length) return feedbackState({ title: tr('noData'), type: 'empty' });
-  return `<div class="stock-table-heading"><h2>${sorted.length} ${esc(tr('securities'))}</h2></div>
+  return `<div class="stock-table-heading">
+      <h2>${sorted.length} ${esc(tr('securities'))}</h2>
+      <div class="stock-mobile-sort" role="group" aria-label="${esc(tr('sortBy'))}">
+        ${mobileSortButton(panel, 'last', tr('last'))}
+        ${mobileSortButton(panel, 'changePercent', compactChangeLabel, changeLabel)}
+        ${mobileSortButton(panel, 'marketValue', valueLabel)}
+      </div>
+    </div>
     <div class="stock-table-frame">
       <div class="stock-table-scroll">
         <div class="stock-table" role="table" aria-label="${type === 'etf' ? 'ETF' : 'Stock'} quotes">
           <div class="stock-table-head" role="row">
             <span role="columnheader">${esc(tr('security'))}</span>
-            <span role="columnheader">${esc(tr('rationale'))}</span>
             <span role="columnheader" aria-sort="${sortDirection(panel, 'last')}">${sortHeader(panel, 'last', tr('last'))}</span>
             <span role="columnheader" aria-sort="${sortDirection(panel, 'changePercent')}">${sortHeader(panel, 'changePercent', changeLabel)}</span>
             <span role="columnheader" aria-sort="${sortDirection(panel, 'marketValue')}">${sortHeader(panel, 'marketValue', valueLabel)}</span>
-            <span role="columnheader"><span class="sr-only">${esc(tr('details'))}</span></span>
           </div>
       ${sorted.map(row => {
         const source = selectionByCode.get(row.marketCode) || {};
-        const description = localizedText(row.rationale ?? source.theme_rationale, '');
-        const expanded = panel.descriptions.has(row.marketCode);
+        const rationale = localizedText(row.rationale ?? source.theme_rationale, '') || '--';
         const change = Number(row.changePercent);
         const link = valueOpportunityUrl(row, type);
         const displaySymbol = row.symbol || ticker(row.marketCode);
         const displayName = row.name || displaySymbol;
-        const rationaleId = `rationale-${String(row.marketCode || displaySymbol).replace(/[^a-z0-9_-]/giu, '-')}`;
+        const changeValue = row.changePercent == null ? '--' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`;
+        const identity = `<img class="symbol-logo" src="${esc(symbolLogoUrl(row, type))}" alt="" width="28" height="28" loading="lazy">
+              <span class="symbol-copy"><strong>${esc(displayName)}</strong><small>${esc(displaySymbol)}</small></span>`;
         return `<div class="stock-record" role="rowgroup">
-          <div class="stock-data-row" role="row"${link ? ` data-stock-url="${esc(link)}" tabindex="0" aria-label="Open ${esc(displayName)} investment analysis"` : ''}>
+          <div class="stock-data-row" role="row">
             <div class="stock-symbol-cell" role="cell">
-              <img class="symbol-logo" src="${esc(symbolLogoUrl(row, type))}" alt="" width="28" height="28" loading="lazy">
-              <span class="stock-symbol-link">
-                <span class="symbol-copy"><strong>${esc(displayName)}</strong><small>${esc(displaySymbol)}</small></span>
-              </span>
+              ${link ? `<a class="stock-symbol-link" href="${esc(link)}" aria-label="Open ${esc(displayName)} investment analysis">${identity}</a>` : `<span class="stock-symbol-link">${identity}</span>`}
             </div>
-            <p class="stock-rationale-cell line-clamp-2" role="cell">${description ? esc(description) : '--'}</p>
-            <span class="numeric-cell" role="cell">${formatNumber(row.last, 2)}</span>
-            <span class="numeric-cell ${row.changePercent == null ? '' : change >= 0 ? 'price-up' : 'price-down'}" role="cell">${row.changePercent == null ? '--' : `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`}</span>
-            <span class="numeric-cell" role="cell">${esc(formatMarketValue(row.marketValue))}</span>
-            <div class="stock-action-cell" role="cell">${description ? `<button type="button" class="description-toggle" data-description="${esc(row.marketCode)}" aria-controls="${esc(rationaleId)}" aria-expanded="${expanded}" aria-label="${esc(expanded ? tr('showLess') : tr('showMore'))} rationale for ${esc(displaySymbol)}"><span class="description-toggle-label">${esc(expanded ? tr('showLess') : tr('showMore'))}</span><img src="/icons/chevron-down.svg" alt="" aria-hidden="true" class="description-chevron${expanded ? ' expanded' : ''}" width="16" height="16"></button>` : ''}</div>
+            <div class="stock-metric-cell numeric-cell" role="cell"><span class="stock-metric-label">${esc(tr('last'))}</span><span class="stock-metric-value">${formatNumber(row.last, 2)}</span></div>
+            <div class="stock-metric-cell numeric-cell ${row.changePercent == null ? '' : change >= 0 ? 'price-up' : 'price-down'}" role="cell" aria-label="${esc(`${changeLabel}: ${changeValue}`)}"><span class="stock-metric-label">${esc(compactChangeLabel)}</span><span class="stock-metric-value">${changeValue}</span></div>
+            <div class="stock-metric-cell numeric-cell" role="cell"><span class="stock-metric-label">${esc(valueLabel)}</span><span class="stock-metric-value">${esc(formatMarketValue(row.marketValue))}</span></div>
           </div>
-          ${description ? `<div class="stock-description-row" id="${esc(rationaleId)}" role="row"${expanded ? '' : ' hidden'}><div class="stock-description-panel" role="cell" aria-colspan="6"><span>${esc(tr('rationale'))}</span><p>${esc(description)}</p></div></div>` : ''}
+          <div class="stock-rationale-row" role="row">
+            <div class="stock-rationale-cell" role="cell" aria-colspan="4">
+              <span class="stock-rationale-label">${esc(tr('rationale'))}</span>
+              <p class="stock-rationale-text">${esc(rationale)}</p>
+            </div>
+          </div>
         </div>`;
       }).join('')}
         </div>
@@ -885,17 +1253,30 @@ function renderPerformance(type) {
 
 function renderExposure(type) {
   const panel = getPanel(type);
-  const container = $('#bubble-plot');
+  const container = $('#exposure-scatter-plot');
   if (!container || detailModel.activeType !== type) return;
   if (panel.exposureState === 'loading' || panel.exposureState === 'idle') {
-    destroyBubbleChart();
+    destroyExposureScatter();
+    renderExposureScatterSummary([], type);
+    container.removeAttribute('tabindex');
     container.innerHTML = spinner(tr('loadingExposure'));
   } else if (panel.exposureState === 'error') {
-    destroyBubbleChart();
+    destroyExposureScatter();
+    renderExposureScatterSummary([], type);
+    container.removeAttribute('tabindex');
     container.innerHTML = feedbackState({ title: tr('unableChart'), action: 'exposure' });
   } else {
-    void renderBubbleChart(container, panel.exposure?.points || [], type);
+    void renderExposureScatter(container, panel.exposure?.points || [], type);
   }
+}
+
+function announceQuoteStatus(message) {
+  const status = $('#quote-table-status');
+  if (!status) return;
+  status.textContent = '';
+  requestAnimationFrame(() => {
+    if (status.isConnected) status.textContent = message;
+  });
 }
 
 function renderQuotes(type) {
@@ -974,6 +1355,12 @@ async function loadQuotes(type, force = false) {
     panel.quotesState = 'error';
   }
   renderQuotes(type);
+  if (detailModel.activeType === type) {
+    if (panel.exposureState === 'success') renderExposure(type);
+    announceQuoteStatus(panel.quotesState === 'success'
+      ? `${getSelections(detailModel.data, type).length} ${tr('securities')} loaded.`
+      : tr('unableData'));
+  }
 }
 
 function loadPanel(type, force = false) {
@@ -1001,7 +1388,7 @@ function faqMarkup(faq) {
 
 function renderDetailPage() {
   destroyPerformanceChart();
-  destroyBubbleChart();
+  destroyExposureScatter();
   document.body.className = 'event-body';
   const theme = detailModel.data.theme || 'Event theme';
   const cover = safeUrl(detailModel.data.cover);
@@ -1025,7 +1412,6 @@ function switchSecurityType(type) {
   const panel = getPanel(type);
   panel.period = '1M';
   panel.sort = null;
-  panel.descriptions.clear();
   panel.quotesState = 'idle';
   $('#event-hero-root').innerHTML = eventHero(detailModel.data, type);
   renderPanel(type);
@@ -1041,13 +1427,9 @@ function cycleSort(type, key) {
   if (panel.sort?.key !== key) panel.sort = { key, order: 'desc' };
   else panel.sort = { key, order: panel.sort.order === 'desc' ? 'asc' : 'desc' };
   renderQuotes(type);
-}
-
-function toggleDescription(type, code) {
-  const panel = getPanel(type);
-  if (panel.descriptions.has(code)) panel.descriptions.delete(code);
-  else panel.descriptions.add(code);
-  renderQuotes(type);
+  const changeLabel = detailModel.data.date ? `${tr('changeSince')} ${formatDate(detailModel.data.date, true)}` : tr('change');
+  const label = key === 'last' ? tr('last') : key === 'changePercent' ? changeLabel : type === 'etf' ? tr('aum') : tr('marketCapTable');
+  announceQuoteStatus(`${getSelections(detailModel.data, type).length} ${tr('securities')} sorted by ${label}, ${panel.sort.order === 'asc' ? 'ascending' : 'descending'}.`);
 }
 
 function installDetailEvents() {
@@ -1088,19 +1470,11 @@ function installDetailEvents() {
     const sort = event.target.closest('[data-sort]');
     if (sort) {
       const key = sort.dataset.sort;
-      cycleSort(detailModel.activeType, sort.dataset.sort);
-      requestAnimationFrame(() => $(`[data-sort="${CSS.escape(key)}"]`)?.focus());
+      const sortLocation = sort.dataset.sortLocation;
+      cycleSort(detailModel.activeType, key);
+      requestAnimationFrame(() => $(`[data-sort="${CSS.escape(key)}"][data-sort-location="${CSS.escape(sortLocation)}"]`)?.focus());
       return;
     }
-    const description = event.target.closest('[data-description]');
-    if (description) {
-      const code = description.dataset.description;
-      toggleDescription(detailModel.activeType, code);
-      requestAnimationFrame(() => $(`[data-description="${CSS.escape(code)}"]`)?.focus());
-      return;
-    }
-    const stockRow = event.target.closest('[data-stock-url]');
-    if (stockRow) location.assign(stockRow.dataset.stockUrl);
   });
   document.body.addEventListener('keydown', event => {
     const tab = event.target.closest?.('[role="tab"]');
@@ -1114,25 +1488,20 @@ function installDetailEvents() {
       tabs[next]?.click();
       return;
     }
-    const stockRow = event.target.closest?.('[data-stock-url]');
-    if (stockRow && event.target === stockRow && (event.key === 'Enter' || event.key === ' ')) {
-      event.preventDefault();
-      location.assign(stockRow.dataset.stockUrl);
-    }
   });
   window.addEventListener('resize', () => {
     cancelAnimationFrame(resizeFrame);
     resizeFrame = requestAnimationFrame(() => {
       if (!detailModel) return;
       performanceRuntime?.chart?.timeScale().fitContent();
-      bubbleRuntime?.chart?.getECharts()?.resize();
+      exposureScatterRuntime?.chart?.getECharts()?.resize();
     });
   });
 }
 
 async function detail(id) {
   destroyPerformanceChart();
-  destroyBubbleChart();
+  destroyExposureScatter();
   document.body.className = 'event-body';
   const initial = bootData?.route === 'detail' && bootData.id === id ? bootData : null;
   document.body.innerHTML = initial?.data
