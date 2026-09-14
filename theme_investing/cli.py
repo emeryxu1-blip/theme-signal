@@ -6,11 +6,12 @@ Usage:
   python cli.py --input input.json --limit 60   # small live smoke test
 
   # pick the LLM API for THIS run without editing env.json:
-  python cli.py --target local --limit 120 '{...}'               # office Wi-Fi -> GPT-5.6 Sol
+  python cli.py --target local --limit 120 '{...}'               # official DeepSeek Flash API
   python cli.py --target overseas '{...}'                        # project key -> overseas production gateway
 
   # advanced: pick the raw profile/environment (override --target):
-  python cli.py --llm-profile local --limit 120 '{...}'          # office Wi-Fi GPT-5.6 Sol profile
+  python cli.py --llm-profile local --limit 120 '{...}'          # official DeepSeek Flash profile
+  python cli.py --llm-profile office_wifi --limit 120 '{...}'    # optional Office-WiFi gateway
   python cli.py --llm-profile claude --limit 120 '{...}'         # optional if configured from env.example.json
   python cli.py --llm-profile production '{...}'                  # gateway; default env internal_equ (overseas prod)
   # choose a specific gateway environment (internal_equ / overseas_prod / wuchang_prod = production;
@@ -26,12 +27,12 @@ import argparse
 import json
 import sys
 
-from ainvest_auth import AInvestAuthError, refresh_c_session_if_configured
 from ainvest_client import AInvestClient
 import config
-from config import ENV_PATH, load_llm_config, load_quote_config, load_env
+from config import load_llm_config, load_quote_config, load_env
 from llm_client import LLMClient
-from workflow import ThemeWorkflow
+from workflow import (DEFAULTS, SelectionUniverseError, StockRationaleError,
+                      StockUniverseError, ThemeWorkflow)
 from theme_upload import ThemeUploadError, configured_upload, upload_result
 
 
@@ -90,10 +91,20 @@ def build_parser() -> argparse.ArgumentParser:
                     help="LLM candidates per relevance request during the scan (default 10)")
     ap.add_argument("--max-scan", type=_nonnegative_int,
                     help="additional safety cap per asset class; use 0 to disable")
-    ap.add_argument("--stock-target", type=int,
-                    help="maximum qualifying stocks to emit after full-universe ranking (default 8)")
-    ap.add_argument("--etf-target", type=int,
-                    help="maximum independently verified ETFs to emit (default 5)")
+    ap.add_argument(
+        "--stock-target",
+        type=_nonnegative_int,
+        default=int(DEFAULTS["stock_target"]),
+        help=(f"exact number of ranked stocks to emit after full-universe "
+              f"ranking; 0 disables stocks (default: {DEFAULTS['stock_target']})"),
+    )
+    ap.add_argument(
+        "--etf-target",
+        type=_nonnegative_int,
+        default=int(DEFAULTS["etf_target"]),
+        help=(f"exact number of ranked ETFs to emit; 0 disables "
+              f"ETFs (default: {DEFAULTS['etf_target']})"),
+    )
     ap.add_argument("--rvol-threshold", type=float,
                     help="event-window peak RVOL confirmation threshold (default 1.5)")
     ap.add_argument("--relevance-threshold", type=float,
@@ -111,11 +122,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="minimum pre-event bars required before the volume baseline is "
                          "trusted; candidates below this are penalised (default 5)")
     ap.add_argument("--target", choices=["local", "overseas"],
-                    help="pick the API set for this run: local=office-WiFi GPT-5.6 Sol plus "
+                    help="pick the API set for this run: local=official DeepSeek Flash plus "
                          "public quote API; overseas=project LLM key plus production "
                          "quote API. --llm-profile/--llm-env/--quote-profile override this.")
     ap.add_argument("--llm-profile",
-                    help="LLM profile from env.json to use for this run (e.g. local, "
+                    help="LLM profile from env.json to use for this run (e.g. local, office_wifi, "
                          "production); overrides active_profiles.llm")
     ap.add_argument("--llm-env",
                     help="override active_environment of the selected LLM profile "
@@ -126,7 +137,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help="quote profile from env.json to use for this run (e.g. "
                          "production); overrides active_profiles.quote")
     ap.add_argument("--dry-run", action="store_true",
-                    help="validate input and configuration without performing C-side login or workflow requests")
+                    help="validate input and configuration without performing workflow requests")
     ap.add_argument("--no-upload", action="store_true",
                     help="skip the configured Cloudflare theme result upload")
     return ap
@@ -138,8 +149,47 @@ def workflow_options(args) -> dict:
     ``--limit N`` sets a top-N market-cap stock boundary and requests an
     independent ordinary ETF boundary. ETF preselection enforces its hard 500
     maximum, while exact direct probes remain additive. Per-asset overrides are
-    applied afterwards when supplied explicitly.
+    applied afterwards when supplied explicitly. Stock and ETF targets are exact;
+    zero disables that output class, and impossible target/boundary combinations
+    are rejected before any workflow requests.
     """
+    effective_stock_target = int(
+        DEFAULTS["stock_target"] if args.stock_target is None else args.stock_target
+    )
+    effective_etf_target = int(
+        DEFAULTS["etf_target"] if args.etf_target is None else args.etf_target
+    )
+    effective_candidate_budget = (
+        args.stock_candidate_budget
+        if args.stock_candidate_budget is not None
+        else int(DEFAULTS["stock_candidate_budget"])
+    )
+    effective_stock_universe = (
+        args.stock_universe
+        if args.stock_universe is not None else args.limit
+    )
+    effective_etf_universe = min(
+        args.etf_universe if args.etf_universe is not None else args.limit,
+        int(DEFAULTS["etf_universe"]),
+    )
+    if args.max_scan:
+        effective_stock_universe = min(effective_stock_universe, args.max_scan)
+        effective_etf_universe = min(effective_etf_universe, args.max_scan)
+    if effective_stock_target > effective_candidate_budget:
+        raise ValueError(
+            "--stock-target cannot exceed --stock-candidate-budget"
+        )
+    if effective_stock_target > effective_stock_universe:
+        raise ValueError(
+            "--stock-target cannot exceed the effective stock universe "
+            "(--stock-universe/--limit)"
+        )
+    if effective_etf_target > effective_etf_universe:
+        raise ValueError(
+            "--etf-target cannot exceed the effective ETF universe "
+            "(--etf-universe/--limit; hard maximum 500)"
+        )
+
     opts = {}
     if args.limit is not None:
         opts["stock_universe"] = args.limit
@@ -180,11 +230,15 @@ def _serialize_output(output: dict) -> str:
 
 
 def main() -> int:
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
+
+    try:
+        opts = workflow_options(args)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     payload = _read_payload(args)
-
-    opts = workflow_options(args)
 
     # Resolve config once, applying per-run profile overrides (no writes to env.json).
     env = load_env()
@@ -208,16 +262,8 @@ def main() -> int:
         prof["active_environment"] = args.llm_env
 
     if args.dry_run:
-        print("[theme-workflow] dry run: C-side login and workflow requests skipped", file=sys.stderr)
+        print("[theme-workflow] dry run: workflow requests skipped", file=sys.stderr)
         return 0
-
-    # An enabled C-side login refreshes the session atomically before quotes are
-    # configured. Static session cookies remain the fallback when it is disabled.
-    try:
-        env = refresh_c_session_if_configured(env, ENV_PATH)
-    except AInvestAuthError as exc:
-        print(f"error: C-side session refresh failed: {exc}", file=sys.stderr)
-        return 2
 
     llm_cfg = load_llm_config(env)
     print(f"[theme-workflow] llm profile={env['active_profiles'].get('llm')!r} "
@@ -233,7 +279,32 @@ def main() -> int:
     llm = build_llm_client(llm_cfg)
     quotes = AInvestClient(quote_cfg)
     wf = ThemeWorkflow(llm, quotes, opts)
-    result = _build_output(payload, wf.run(payload))
+    try:
+        workflow_result = wf.run(payload)
+    except SelectionUniverseError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except StockUniverseError as exc:
+        print(f"error: stock universe retrieval failed: {exc}", file=sys.stderr)
+        return 2
+    except StockRationaleError as exc:
+        details = []
+        if exc.missing_codes:
+            details.append("missing=" + ",".join(exc.missing_codes))
+        if exc.rejections:
+            details.append(
+                "rejected=" + ",".join(
+                    f"{code}:{reason}"
+                    for code, reason in exc.rejections.items()
+                )
+            )
+        suffix = f"; {'; '.join(details)}" if details else ""
+        print(
+            f"error: stock rationale generation failed: {exc}{suffix}",
+            file=sys.stderr,
+        )
+        return 4
+    result = _build_output(payload, workflow_result)
     serialized = _serialize_output(result)
     sys.stdout.write(serialized)
     try:

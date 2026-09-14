@@ -23,14 +23,8 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-REPO_ROOT = ROOT.parent.parent
 TEMPLATE_DIR = ROOT / "assets" / "request-templates"
 ENV_CONFIG_PATH = ROOT.parent / "env.json"
-THEME_DIR = REPO_ROOT / "theme_investing"
-if str(THEME_DIR) not in sys.path:
-    sys.path.insert(0, str(THEME_DIR))
-
-from ainvest_auth import AInvestAuthError, c_side_auto_login_enabled, refresh_c_session_if_configured
 
 ENDPOINT_NAMES = ("snapshot", "series", "multi_kline", "single_tick", "relation_list")
 
@@ -129,20 +123,6 @@ def scene_config(env_config, scene):
         return {}
     config = scenes.get(scene, {})
     return config if isinstance(config, dict) else {}
-
-
-def c_auto_login_enabled(env_config, scene):
-    return scene == "c" and c_side_auto_login_enabled(env_config)
-
-
-def refresh_c_auth_if_needed(args, scene, env_config):
-    """Refresh configured C-side cookies unless caller auth or dry-run wins."""
-    if args.dry_run or args.auth_value or not c_auto_login_enabled(env_config, scene):
-        return env_config
-    try:
-        return refresh_c_session_if_configured(env_config, Path(args.env_file))
-    except AInvestAuthError as exc:
-        raise ValueError(f"C-side session refresh failed: {exc}") from exc
 
 
 def default_header_value(env_config, name, fallback):
@@ -481,7 +461,6 @@ def main():
         scene = resolve_scene(args, env_config)
         payload, template_name = load_body(args)
         endpoint_name = args.endpoint or infer_endpoint(payload, template_name)
-        env_config = refresh_c_auth_if_needed(args, scene, env_config)
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

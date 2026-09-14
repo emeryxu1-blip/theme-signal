@@ -765,7 +765,9 @@ _NON_DIRECTIONAL_SHORT_RE = re.compile(
     re.IGNORECASE,
 )
 _EXCHANGE_TRADED_NOTE_RE = re.compile(
-    r"\b(?:etns?|exchange[ -]traded notes?)\b", re.IGNORECASE,
+    r"\b(?:etns?|exchange[\s_\-\u00a0\u2010-\u2015\u2212]*"
+    r"traded[\s_\-\u00a0\u2010-\u2015\u2212]*notes?)\b",
+    re.IGNORECASE,
 )
 _MARKET_CODE_RE = re.compile(r"\d+:[A-Za-z0-9.\-]+")
 
@@ -2318,123 +2320,296 @@ def basket_weighted_overlap(left: dict, right: dict) -> float:
     )
 
 
+def _is_explicit_ce(candidate: dict) -> bool:
+    """Return whether metadata explicitly identifies an exchange-traded fund."""
+    return _normalise(candidate.get("security_class")) == "ce"
+
+
+def _is_explicit_etn(candidate: dict) -> bool:
+    """Fail closed when any structured or descriptive field identifies an ETN.
+
+    This check intentionally runs before the relaxed CE tier.  Some data rows
+    use ``security_class=CE`` for both funds and notes, leaving ``etf_type`` or
+    the product name as the only explicit ETN signal.
+    """
+    if str(candidate.get("exclusion_reason") or "").strip().casefold() in {
+        "exchange-traded note", "exchange traded note",
+    }:
+        return True
+    for key in ("security_class", "etf_type"):
+        structured_type = re.sub(
+            r"[\s_\-\u00a0\u2010-\u2015\u2212]+", " ",
+            str(candidate.get(key) or "").strip(),
+        ).casefold()
+        if structured_type in {"etn", "etns", "note", "exchange traded note"}:
+            return True
+    for key in (
+        "security_class", "etf_type", "name", "fund_strategy",
+        "fund_category", "fund_niche", "fund_focus", "selection_criteria",
+        "asset_class",
+    ):
+        if _EXCHANGE_TRADED_NOTE_RE.search(str(candidate.get(key) or "")):
+            return True
+    return False
+
+
+def _fallback_ranking_key(candidate: dict) -> tuple:
+    """Rank weak/discovered CE rows deterministically without inventing fit."""
+    evidence_values = [
+        _finite_float(candidate.get(key))
+        for key in (
+            "unified_score", "theme_evidence_score", "static_theme_exposure",
+            "base_theme_exposure", "preselect_score",
+        )
+    ]
+    evidence = max((value for value in evidence_values if value is not None),
+                   default=0.0)
+    turnover = _finite_float(candidate.get("turnover"))
+    aum = _finite_float(candidate.get("aum"))
+    expense = _finite_float(candidate.get("expense_ratio"))
+    rank = _finite_float(candidate.get("rank"))
+    source_order = _finite_float(candidate.get("source_order"))
+    fallback_rank = _finite_float(candidate.get("fallback_rank"))
+    return (
+        -evidence,
+        int(bool(candidate.get("fallback_direction_mismatch"))),
+        -int(bool(candidate.get("mandate_verified"))),
+        rank if rank is not None else math.inf,
+        source_order if source_order is not None else math.inf,
+        fallback_rank if fallback_rank is not None else math.inf,
+        -(turnover if turnover is not None else -1.0),
+        -(aum if aum is not None else -1.0),
+        expense if expense is not None else math.inf,
+        str(candidate.get("code") or ""),
+    )
+
+
+def _is_basket_like(candidate: dict) -> bool:
+    return bool(
+        candidate.get("selection_lane") == MULTI_STOCK_BASKET_LANE
+        or _normalised_portfolio(candidate)
+    )
+
+
+def _economic_overlap_reason(
+    candidate: dict,
+    accepted: list[dict],
+    overlap_threshold: float,
+) -> str | None:
+    """Return the existing economic-dedupe reason against diverse rows."""
+    lane = candidate.get("selection_lane")
+    if lane == SINGLE_STOCK_LEVERAGED_LANE:
+        underlying = str(candidate.get("underlying_code") or "").strip()
+        if underlying and any(
+            other.get("selection_lane") == SINGLE_STOCK_LEVERAGED_LANE
+            and str(other.get("underlying_code") or "").strip() == underlying
+            for other in accepted
+        ):
+            return "duplicate_selected_stock_underlying"
+
+    if not _is_basket_like(candidate):
+        return None
+    identity = _basket_identity(candidate)
+    if identity and any(
+        _is_basket_like(other) and _basket_identity(other) == identity
+        for other in accepted
+    ):
+        return "duplicate_benchmark_or_base_index"
+    if any(
+        _is_basket_like(other)
+        and basket_weighted_overlap(candidate, other) >= overlap_threshold
+        for other in accepted
+    ):
+        return "weighted_portfolio_overlap"
+    return None
+
+
 def select_output_etfs(
     candidates: list[dict],
     limit: int | None = None,
     *,
     basket_overlap_threshold: float = 0.90,
 ) -> list[dict]:
-    """Select eligible ETFs with no lane quota and economic-exposure dedupe.
+    """Build the deterministic output pool, including bounded CE reserves.
 
-    Exact wrappers are limited to one product per selected underlying. Baskets
-    dedupe first by a documented benchmark/base index, then by at least 90%
-    normalized weighted portfolio overlap. The already approved unified score
-    and investability tie-breaks decide which duplicate survives.
+    Currently eligible products are preferred to weak or newly discovered rows.
+    A non-eligible reserve must be explicitly identified as ``security_class=CE``;
+    explicit exchange-traded notes are always excluded. Duplicate market codes
+    are also a hard exclusion. Economic duplicates are placed after every
+    diverse eligible and CE-reserve row so :func:`compose_output_etfs` can relax
+    overlap only when doing so is necessary to satisfy the requested count.
+
+    Legacy hand-built candidates without explicit CE metadata retain the old
+    hard economic-dedupe behavior. This preserves compatibility while ensuring
+    that relaxation is never applied to a product whose security class is
+    unknown.
     """
     if limit is not None and limit < 0:
         raise ValueError("ETF output limit cannot be negative")
     if limit == 0:
         return []
     overlap_threshold = max(0.0, min(1.0, basket_overlap_threshold))
-    ordered = sorted(
-        (candidate for candidate in candidates
-         if candidate.get("output_eligible")),
-        key=_ranking_key,
-    )
-    selected: list[dict] = []
-    seen_codes: set[str] = set()
-    seen_underlyings: set[str] = set()
-    seen_basket_identities: set[tuple[str, str]] = set()
-    accepted_baskets: list[dict] = []
-
-    for candidate in ordered:
-        code = str(candidate.get("code") or "").strip()
-        if not code or code in seen_codes:
+    eligible: list[dict] = []
+    ce_fallback: list[dict] = []
+    for candidate in candidates:
+        code = str(candidate.get("code") or "").strip().upper()
+        if not _MARKET_CODE_RE.fullmatch(code):
             candidate.update({
+                "selection_tier": "excluded",
+                "selection_basis": "invalid_market_code",
                 "dedupe_excluded": True,
-                "dedupe_reason": "duplicate_market_code",
+                "dedupe_reason": "invalid_market_code",
             })
             continue
-        lane = candidate.get("selection_lane")
-        if lane == SINGLE_STOCK_LEVERAGED_LANE:
-            underlying = str(candidate.get("underlying_code") or "").strip()
-            if not underlying or underlying in seen_underlyings:
-                candidate.update({
-                    "dedupe_excluded": True,
-                    "dedupe_reason": "duplicate_selected_stock_underlying",
-                })
-                continue
-            seen_underlyings.add(underlying)
-        elif lane == MULTI_STOCK_BASKET_LANE:
-            identity = _basket_identity(candidate)
-            if identity and identity in seen_basket_identities:
-                candidate.update({
-                    "dedupe_excluded": True,
-                    "dedupe_reason": "duplicate_benchmark_or_base_index",
-                })
-                continue
-            if any(
-                basket_weighted_overlap(candidate, accepted) >= overlap_threshold
-                for accepted in accepted_baskets
-            ):
-                candidate.update({
-                    "dedupe_excluded": True,
-                    "dedupe_reason": "weighted_portfolio_overlap",
-                })
-                continue
-            if identity:
-                seen_basket_identities.add(identity)
-            accepted_baskets.append(candidate)
+        candidate["code"] = code
+        if _is_explicit_etn(candidate):
+            candidate.update({
+                "selection_tier": "excluded",
+                "selection_basis": "explicit_etn_excluded",
+                "dedupe_excluded": True,
+                "dedupe_reason": "exchange-traded note",
+            })
+            continue
+        if candidate.get("output_eligible"):
+            candidate.update({
+                "selection_tier": "eligible",
+                "selection_basis": "eligible_diverse",
+            })
+            eligible.append(candidate)
+            continue
+        if _is_explicit_ce(candidate):
+            if candidate.get("static_theme_exposure") is None:
+                candidate["static_theme_exposure"] = 0.0
+            candidate.update({
+                "selection_tier": "ce_fallback",
+                "selection_basis": "ce_fallback_diverse",
+            })
+            ce_fallback.append(candidate)
+            continue
+        candidate.update({
+            "selection_tier": "excluded",
+            "selection_basis": "not_eligible_or_explicit_ce",
+        })
 
-        candidate.update({"dedupe_excluded": False, "dedupe_reason": None})
-        selected.append(candidate)
-        seen_codes.add(code)
-        if limit is not None and len(selected) >= limit:
-            break
+    eligible.sort(key=_ranking_key)
+    ce_fallback.sort(key=_fallback_ranking_key)
+
+    diverse: dict[str, list[dict]] = {
+        "eligible": [], "ce_fallback": [],
+    }
+    overlapping: dict[str, list[dict]] = {
+        "eligible": [], "ce_fallback": [],
+    }
+    accepted_diverse: list[dict] = []
+    seen_codes: set[str] = set()
+
+    for tier, ordered in (("eligible", eligible), ("ce_fallback", ce_fallback)):
+        for candidate in ordered:
+            code = str(candidate.get("code") or "").strip()
+            canonical_code = code.casefold()
+            if not code or canonical_code in seen_codes:
+                candidate.update({
+                    "selection_basis": "duplicate_market_code_excluded",
+                    "dedupe_excluded": True,
+                    "dedupe_reason": "duplicate_market_code",
+                    "overlap_relaxed": False,
+                })
+                continue
+            seen_codes.add(canonical_code)
+
+            overlap_reason = _economic_overlap_reason(
+                candidate, accepted_diverse, overlap_threshold,
+            )
+            if overlap_reason:
+                # Economic overlap is relaxable only for explicit CE rows. A
+                # legacy candidate with no structured class retains the prior
+                # hard-dedupe contract.
+                if not _is_explicit_ce(candidate):
+                    candidate.update({
+                        "dedupe_excluded": True,
+                        "dedupe_reason": overlap_reason,
+                        "overlap_relaxed": False,
+                    })
+                    continue
+                if candidate.get("static_theme_exposure") is None:
+                    candidate["static_theme_exposure"] = 0.0
+                candidate.update({
+                    "selection_basis": f"{tier}_overlap_relaxed",
+                    "dedupe_excluded": False,
+                    "dedupe_reason": overlap_reason,
+                    "overlap_relaxed": True,
+                })
+                overlapping[tier].append(candidate)
+                continue
+
+            candidate.update({
+                "selection_basis": f"{tier}_diverse",
+                "dedupe_excluded": False,
+                "dedupe_reason": None,
+                "overlap_relaxed": False,
+            })
+            diverse[tier].append(candidate)
+            accepted_diverse.append(candidate)
+
+    selected = [
+        *diverse["eligible"],
+        *diverse["ce_fallback"],
+        *overlapping["eligible"],
+        *overlapping["ce_fallback"],
+    ]
+    if limit is not None:
+        return selected[:limit]
     return selected
 
 
 def compose_output_etfs(
     deduped_candidates: list[dict], target: int,
 ) -> list[dict]:
-    """Compose ranked, deduplicated ETFs with leverage first and basket coverage.
+    """Compose exactly ``target`` ETFs whenever the supplied pool permits it.
 
-    ``deduped_candidates`` is expected to be in final ranking order. Ineligible
-    rows are still filtered defensively: composition can reserve an output slot,
-    but it cannot promote a candidate that failed evidence or product gates.
+    Eligible, economically diverse products remain preferred. Explicit-CE
+    fallback products are considered next, and economic-overlap reserves are
+    reached only after all diverse rows. The historical best-wrapper and
+    conventional-basket reservations remain in force inside that preferred
+    set. A genuinely exhausted input pool returns short so the workflow can
+    attempt live/offline CE expansion before deciding whether to fail.
     """
     if target < 0:
         raise ValueError("ETF output target cannot be negative")
     if target == 0:
         return []
 
-    eligible = [
-        candidate for candidate in deduped_candidates
-        if candidate.get("output_eligible")
-    ]
-    if not eligible:
+    # Reapplying selection makes direct callers safe and deterministic while
+    # remaining idempotent for the normal select-then-compose workflow.
+    pool = select_output_etfs(deduped_candidates, limit=None)
+    if not pool:
         return []
 
+    preferred = [
+        candidate for candidate in pool
+        if not candidate.get("overlap_relaxed")
+    ]
     best_wrapper = next((
-        candidate for candidate in eligible
-        if candidate.get("selection_lane") == SINGLE_STOCK_LEVERAGED_LANE
+        candidate for candidate in preferred
+        if candidate.get("selection_tier") == "eligible"
+        and candidate.get("selection_lane") == SINGLE_STOCK_LEVERAGED_LANE
     ), None)
     best_basket = next((
-        candidate for candidate in eligible
-        if candidate.get("selection_lane") == MULTI_STOCK_BASKET_LANE
+        candidate for candidate in preferred
+        if candidate.get("selection_tier") == "eligible"
+        and candidate.get("selection_lane") == MULTI_STOCK_BASKET_LANE
     ), None)
 
     selected = [best_wrapper] if best_wrapper is not None else []
     selected_ids = {id(candidate) for candidate in selected}
     remaining = [
-        candidate for candidate in eligible if id(candidate) not in selected_ids
+        candidate for candidate in pool if id(candidate) not in selected_ids
     ]
     capacity = max(0, target - len(selected))
     tail = remaining[:capacity]
 
-    # Reserve one slot without otherwise disturbing unified ranking. If the best
-    # basket already falls inside the boundary it keeps its ranked position; if
-    # it would be crowded out, it replaces only the boundary product.
+    # Reserve one conventional eligible basket without otherwise disturbing
+    # tier/ranking order. An overlap reserve is never promoted for diversity.
     if (
         target >= 2
         and best_basket is not None

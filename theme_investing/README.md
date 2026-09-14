@@ -2,7 +2,7 @@
 
 Given an investing **theme**, the **date** it became hot, and a related **article URL**,
 this workflow returns the most exposed US stocks and ETFs plus an SEO FAQ, combining
-LLM semantic analysis (OpenAI-compatible LiteLLM gateway) with live market data
+LLM semantic analysis (official DeepSeek Flash API by default) with live market data
 (AInvest OpenAPI quote).
 
 ## Input
@@ -26,16 +26,18 @@ LLM semantic analysis (OpenAI-compatible LiteLLM gateway) with live market data
       "event_date": "2026-07-09"
     }
   ],
-  "ThemeEtfs":   [ ... up to 5 ],
+  "ThemeEtfs":   [ ... exactly 5 by default ],
   "ThemeFAQ":    [ {"question","answer"}, ... 4-8 ]
 }
 ```
+`ThemeStocks` and `ThemeEtfs` contain exactly their requested positive targets; defaults are eight
+stocks and five ETFs. Zero disables that asset class. FAQ count remains a bounded range.
 `theme_cn` is the theme-only LLM pass's faithful Simplified Chinese translation of the exact
 input `theme`.
-`Theme exposure` is the only exposed score (1–5). Stock exposure combines the LLM
-business-exposure signals with a small, direction-neutral market-strength uplift. Basket-ETF
-exposure is calculated from independently scored full portfolios, relevant-issuer breadth,
-selected-stock coverage, and a small canonical-mandate term. Baskets require at least 60% reported
+`Theme exposure` is the only exposed score (1–5). Public stocks receive a deterministic 5.0-to-3.0
+attractiveness ladder in their frozen order; price and volume cannot change that order. Basket-ETF exposure is
+calculated from independently scored full portfolios, relevant-issuer breadth, selected-stock
+coverage, and a small canonical-mandate term. Baskets require at least 60% reported
 holdings and normally at least 80% semantic coverage. Below 80%, a conservative partial-evidence
 lower bound may qualify only if the known holdings still clear both the normal 0.25 theme-score
 gate and the requirement for two relevant issuers after every unresolved holding is counted as
@@ -44,9 +46,12 @@ Exact single-stock products use the verified underlying stock's causal-quality e
 direct-asset funds use documented canonical pool/mandate facts. Internal direction,
 price, volume, leverage, and calculation fields are not included in `result.json`.
 `theme_rationale` is a multilingual object containing semantically equivalent English (`en`) and
-Simplified Chinese (`zh`) versions of the security's factual business, holdings, or mandate facts,
-causal financial pathway, supported catalyst, and main limitation. Neither version exposes
-internal scores, rankings, price/volume calculations, screening mechanics, or thematic-fit claims.
+Simplified Chinese (`zh`) versions. A stock rationale is one concise broker-style case: it first
+introduces what the company sells or operates, then states the specific event/theme relationship,
+and finally connects that relationship to orders, revenue, margins, or earnings. ETF rationales use
+factual holdings or mandate evidence and disclose material product risks. Neither language exposes
+internal scores, rankings, price/volume calculations, screening mechanics, or unsupported customer,
+contract, catalyst, or financial-magnitude claims.
 
 ## Pipeline
 1. **Validate + fetch article** (`article.py`).
@@ -54,19 +59,22 @@ internal scores, rankings, price/volume calculations, screening mechanics, or th
    theme label and defines its canonical scope, aliases, direct business models, pure-play
    descriptors, enablers, exclusions, and proposed core companies. A second pass analyzes the
    article for direction, catalyst, operating evidence, and security mentions without changing
-   that frozen definition. The guaranteed mention region is the title plus the first 1,500
-   normalized article characters. Missing or invalid direction defaults to bullish.
-3. **Finite, theme-first stock screen** — proposed entities are validated through the frozen
-   local `ainvest-marketcode` references, restricted to ordinary US stocks. The 120-name semantic
-   work set reserves up to 20 resolved theme entities, up to 20 literal title/lede anchors, and 20
-   broad-liquidity names, then fills from theme-only GICS/business matches. Unused space flows to
-   theme matching and broad fallback. Resolved anchors outside the top-N quote boundary require
-   one batched live profile confirmation. Every admitted name is scored before slots are assigned;
-   direct operators and pure plays rank ahead of suppliers and generic AI/cloud names. Generic
-   duration/growth/market-beta effects remain ineligible, and share classes consume one issuer slot.
-4. **Theme-agnostic, stock-led ETF discovery** — screening publishes the top eight stocks and
-   retains up to 30 issuer-deduplicated causal qualifiers as internal ETF evidence. Every theme
-   runs stock-derived discovery, whether or not it matches the static catalog. The public eight
+   that frozen definition. Candidate discovery covers the title, lede, and article body, then adds
+   an LLM event-ecosystem map of direct operators, suppliers, customers, partners, competitors,
+   complementary businesses, and second-order beneficiaries. Every proposed company must resolve
+   to an ordinary US stock and is hydrated with its company introduction, sector, and industry.
+   Missing or invalid direction defaults to bullish.
+3. **Finite, relationship-first stock screen** — the bounded semantic work set combines the
+   resolved article and ecosystem companies with frozen-theme entities and theme-only
+   industry/business matches. Candidates are issuer-deduplicated and ranked through descending
+   evidence tiers: grounded event relationship, structural relationship, weaker directional
+   relationship, article/ecosystem relevance, sector relevance, and finally the broad live/local
+   investable universe. Strong evidence determines ranking rather than publication eligibility;
+   share classes consume one issuer slot, and local `ES` rows backfill a short live universe.
+4. **Complete and freeze both security lists** — the exact stock codes and order are frozen before
+   stock-led ETF discovery begins. It retains up to 30
+   issuer-deduplicated structural qualifiers as internal ETF evidence. Every theme runs
+   stock-derived discovery, whether or not it matches the static catalog. The public stocks
    receive dedicated leveraged/long or inverse probes plus the generic relation; exact wrappers
    are verified from ETF security class, exact benchmark market code, structured direction, and
    leverage. Generic related ETFs are scanned for all evidence stocks, retaining the top 100 per
@@ -76,8 +84,10 @@ internal scores, rankings, price/volume calculations, screening mechanics, or th
    both Consumer Staples and Consumer Discretionary discovery. Ordinary basket candidates have a
    hard 500-name cap; verified direct probes are additive. A live ETF-universe scan is used once
    to recover exact wrappers when stock-specific sources fail or return none, with the local CE
-   list only as a fallback.
-5. **Evidence lanes and leveraged-first composition** — direction-aligned >1× through 3× exact
+   list as the final ETF screening fallback. Eligible products rank first, followed by
+   theme-adjacent discovered funds, broader live `CE` products, and the offline `CE` universe.
+   ETF codes and order are then frozen, and both exact counts are asserted before narration.
+5. **Evidence lanes and exact ETF composition** — direction-aligned >1× through 3× exact
    single-stock products can qualify without physical holdings. Conventional 1× long baskets can
    qualify in either direction: in bearish runs they represent downside sensitivity among
    vulnerable holdings and are narrated that way, not as bullish exposure. Up to 40 basket
@@ -88,28 +98,30 @@ internal scores, rankings, price/volume calculations, screening mechanics, or th
    as zero exposure—still clears the same score and issuer gates; this partial-evidence mode is
    explicitly logged. A free-form mandate mismatch cannot block holdings assessment; canonical
    mandate alignment is only a 5% corroborating signal. Direct-asset products still require
-   explicit canonical mandate evidence. ETNs, leveraged multi-stock baskets, option-income,
-   buffered, hedged, long-short, ambiguous, and over-3× products are rejected. After
-   direct-underlying and economic-overlap deduplication, the best eligible leveraged wrapper is
-   first. For targets of at least two, the best eligible conventional basket is guaranteed one
-   slot; remaining slots follow the unified rank. Ineligible baskets are never promoted, and
-   target-one or no-basket runs may contain only the wrapper. Fewer than five ETFs is valid.
-6. **Market features (finalists only)** — daily K-lines are fetched **only for the already-qualified finalists**. Signed change and abnormal return remain available internally, while the scoring uplift uses a tie-aware percentile of `|Chg %|` separately for stocks and ETFs plus the existing RVOL confirmation. Equal positive and negative moves contribute equally; price action never establishes thematic exposure. These values are not passed to the narrative prompt.
-7. **Theme exposure + narrative + FAQ** — stock ranking is `80% × theme semantic score + 20% ×
-   article support`; the article cannot make an otherwise ineligible ordinary candidate qualify.
-   Validated title/lede anchors are guaranteed when there are eight or fewer; with more than eight,
-   only the eight highest 80/20 scores remain. Weak guaranteed anchors appear at the bottom with an
-   evidence-limited rationale. Stock and ETF labels may receive a market-strength uplift capped at
-   10%, but market data cannot change stock membership or semantic order. The configured LLM writes objective,
-   causal English and Simplified-Chinese rationales.
+   explicit canonical mandate evidence. Strictly eligible products remain preferred. If needed for
+   the exact target, lower tiers may include inverse, leveraged, option-income, buffered, hedged,
+   long-short, alternative-strategy, or economically overlapping `CE` products. Explicit ETNs,
+   invalid market codes, and duplicate codes remain excluded. Known daily-reset products are
+   narrated with a concise compounding/path-dependence disclosure.
+6. **Market features (finalists only)** — daily K-lines are fetched **only for the already-qualified finalists**. Signed change and abnormal return remain available internally. ETF labels may use a small, direction-neutral uplift based on a tie-aware percentile of `|Chg %|` plus RVOL confirmation; public-stock labels remain relationship-only. Equal positive and negative moves contribute equally, and price action never establishes thematic exposure. These values are not passed to the narrative prompt.
+7. **Independent narration + FAQ** — only after both baskets are frozen does narration begin.
+   Each missing, malformed, mismatched, unsafe, or duplicated row gets one same-code retry and then
+   deterministic bilingual fallback prose; narration never substitutes a security, changes order,
+   reduces counts, or fails the run. Strong stock cases follow business → event relationship →
+   financial pathway. Weaker cases use business → core demand/scale/execution lever → financial
+   pathway without exposing screening weakness. A run fails for counts only when the combined
+   bounded live and offline universe lacks enough valid unique securities.
 
 ## Scoring
-For stocks, theme-only eligibility uses `theme_relevance`, exposure type, confidence, specificity,
-materiality, and evidence strength; generic factor proxies fail before truncation. Ordering uses
-`80% × theme semantic score + 20% × article_support`. Stable application-owned candidate IDs join
-LLM responses; unresolved rows retry once in batches of at most five. The same causal score receives
-the bounded display-only market uplift. Basket component scoring treats the exact theme and frozen
-theme profile as authoritative; article context is secondary and may be empty. Every valid stock
+For public stocks, relationship ranking covers direct exposure, suppliers, customers, partners,
+competitors, complementary businesses, and defensible second-order beneficiaries. Directional
+consistency, evidence strength, confidence, specificity, materiality, and a concrete financial
+pathway rank ahead of generic factor and broad-universe fallbacks. Public `Theme exposure` is the
+deterministic 5.0-to-3.0 rank ladder; price and volume remain private diagnostics. ETF
+discovery continues to use the stricter structural theme score privately, so a broker-relevant
+indirect public stock does not automatically become ETF holdings evidence. Basket component scoring
+treats the exact theme and frozen theme profile as authoritative; article context is secondary and
+may be empty. Every valid stock
 score already produced in the run is reused, including negative/ineligible evidence, and only
 unknown holdings are sent for component scoring. Payload-related HTTP 400/413/422 responses and
 retryable transport failures recover through bounded groups of at most five holdings, prioritized
@@ -140,15 +152,14 @@ Create or edit `my_input.json`:
 {"theme":"AI memory","date":"2026-07-09","url":"https://news.ainvest.com/deep-topic/topic/dt_01KX27F69TZTJ1QZV2RS9XX6M9"}
 ```
 
-The workflow fetches the configured top-N liquid stock boundary and builds a 120-name semantic
-work set from resolved theme/title-lede entities, a 20-name broad lane, and term-balanced
-theme-only industry/business lanes whose taxonomy ties are sampled independently of market-cap
-order. It applies the causal-evidence gate
-(`--relevance-threshold` defaults to 3.3), then ranks and issuer-deduplicates the survivors. It does
-not stop when early mega-caps fill the nominal target. ETF discovery remains finite and strict
-evidence/structure checks may return fewer than five funds. The CLI default limit is 2,000 for the
-cheap stock boundary; the ordinary ETF candidate set never exceeds 500, while exact wrappers are
-additive.
+The workflow fetches the configured top-N liquid stock boundary and builds a bounded semantic work
+set from resolved title, lede, article-body, frozen-theme, and event-ecosystem entities plus
+term-balanced industry/business lanes. It applies the grounded relationship gate
+(`--relevance-threshold` defaults to 3.3), then ranks and issuer-deduplicates the survivors and
+walks reserves until the exact stock target is valid. It does not stop when early mega-caps fill the
+target. ETF discovery remains finite, but progressively broader `CE` fallback tiers fill the exact
+ETF target. The CLI default limit is 2,000 for the cheap stock boundary; the ordinary ETF candidate set
+never exceeds 500, while exact wrappers are additive.
 Final JSON goes to **stdout**; progress goes to **stderr**.
 
 The simplest default run is:
@@ -157,14 +168,21 @@ The simplest default run is:
 ./run_theme.sh
 ```
 
-`run_theme.sh` automatically loads `.env.upload`, runs the Office-WiFi `gpt-5.6-sol` workflow with
-`my_input.json` and the CLI's default `--limit 2000`, writes the public JSON to
-`result.json`, streams progress to the terminal and `run.log`, and stores the same
-result in Cloudflare. Arguments are forwarded to the CLI, so a smaller local-only run is:
+`run_theme.sh` automatically loads `.env.upload`, runs the official DeepSeek `deepseek-flash` workflow with
+`my_input.json` and the CLI's default `--limit 2000`, streams progress to the terminal and
+`run.log`, and stores the successful public result in Cloudflare. The runner first captures output
+in a temporary file and atomically replaces `result.json` only after the complete run succeeds. A
+genuine live-plus-offline universe-exhaustion failure exits nonzero, uploads nothing, and preserves
+the previous `result.json`; narration outages still produce a complete result.
+Arguments are forwarded to the CLI, so a smaller local-only run is:
 
 ```bash
 ./run_theme.sh --limit 200 --no-upload
 ```
+
+Narration retries and deterministic fallback use are recorded by market code in `run.log`.
+Universe-exhaustion diagnostics report the asset class, requested count, available unique count,
+and exhausted sources; stdout contains no partial JSON.
 
 `--limit` reduces the quote-universe boundaries, but it does not reduce the default
 120-stock semantic budget or the 40 full ETF portfolio assessments. For a quick
@@ -195,6 +213,9 @@ set +a
 python3 cli.py --target local --input my_input.json --limit 2000 > result.json 2>run.log
 ```
 
+Direct shell redirection can truncate its destination before the CLI starts. Use `run_theme.sh`
+when the previous `result.json` must be preserved on failure.
+
 The CLI also defaults `--input` to `my_input.json` and `--limit` to `2000`, so after
 loading `.env.upload` this shorter command has the same behavior:
 
@@ -208,12 +229,13 @@ Use `--no-upload` when an intentional local-only run is needed.
 python3 cli.py --no-upload > result.json 2>run.log
 ```
 
-*Note: the default runner selects the local Office-WiFi OpenAI-compatible
-`gpt-5.6-sol` profile. `--target` remains available for explicit local/overseas selection.*
+*Note: the default runner selects the local official DeepSeek `deepseek-flash` profile.
+`--target` remains available for explicit local/overseas selection.*
 
 ## Config
 
-All endpoints/secrets come from `../Skills/env.json`:
+Configure endpoints and profile secrets in the gitignored `../Skills/env.json`.
+`DEEPSEEK_API_KEY` overrides the local DeepSeek profile's `api_key` when set.
 Use `tail -f run.log` in another terminal to monitor progress.
 
 ```bash
@@ -230,8 +252,11 @@ python3 cli.py --target local \
   '{"theme":"AI memory","date":"2026-07-09","url":"https://news.ainvest.com/..."}' \
   > result.json 2>run.log
 
-# overseas production gateway instead of the default Office-WiFi gpt-5.6-sol route:
+# use the overseas production gateway:
 python3 cli.py --target overseas --input my_input.json > result.json 2>run.log
+
+# optional Office-WiFi gateway profile from env.example.json:
+python3 cli.py --llm-profile office_wifi --input my_input.json > result.json 2>run.log
 
 # top 100 stocks by market cap + at most 100 theme-derived ETF candidates:
 python3 cli.py --target local --input my_input.json --limit 100 > result.json 2>run.log
@@ -258,8 +283,8 @@ tail -f run.log     # Ctrl-C to stop watching; the run keeps going
 #     --etf-evidence-stock-limit N qualified internal ETF anchors (default 30)
 #     --etf-universe N        lower the ordinary ETF boundary (hard maximum 500)
 #     --relevance-batch N     candidates per LLM relevance request during the scan (default 10)
-#     --stock-target N        maximum qualifying stocks to emit (default 8)
-#     --etf-target N          maximum verified ETFs to emit (default 5)
+#     --stock-target N        exact stock count; 0 disables stocks (default 8)
+#     --etf-target N          exact ETF count; 0 disables ETFs (default 5)
 #     --relevance-threshold F minimum LLM relevance 1–5 before evidence gates (default 3.3)
 #     --min-relevance-confidence F minimum confidence before stock eligibility (default 0.55)
 #     --etf-min-theme-score F absolute full-portfolio ETF threshold (default 0.25)
@@ -291,14 +316,24 @@ Retry a completed `result.json` without rerunning any LLM or quote stages:
 ```
 
 ## Config
-All endpoints/secrets come from `../Skills/env.json`:
+Configure endpoints and profile secrets in the gitignored `../Skills/env.json`:
 - LLM: `active_profiles.llm` selects a profile; the default `llm_profiles.local` route uses
-  the Office-WiFi gateway and `gpt-5.6-sol`.
-- Quotes: `active_scene` (use `c` off-network) + cookie (`sessionid`/`userid`).
-  Automatic C-side login also requires the browser-compatible signing key at
-  `../Skills/ainvest-password-signing-key.pem` (ignored by Git), or an explicit
-  `password_signing_key_file`/`AINVEST_PASSWORD_SIGNING_KEY_FILE` override.
-TLS verification is enabled by default; configure `ca_file` when a corporate CA is required.
+  the official DeepSeek API at `https://api.deepseek.com/chat/completions` and
+  `deepseek-flash`, with thinking enabled, low reasoning effort, an 8,000-token completion
+  budget, and a 600-second timeout. `DEEPSEEK_API_KEY` overrides the profile's `api_key`.
+  Use `llm_profiles.office_wifi` for the optional Office-WiFi gateway, or `--target overseas`
+  for the production LLM and quote profiles.
+- Quotes: `active_scene` (use `c` off-network) + manually maintained cookie values
+  (`sessionid`/`userid`). The application never logs in or refreshes these values.
+TLS verification is enabled by default. When no `ca_file` is configured, the client supplements
+Python's default trust store with the installed `certifi` bundle; configure `ca_file` when a
+corporate CA is required.
+
+The DeepSeek client uses `system` messages and sends the configured completion budget as
+`max_tokens`. Structured workflow requests use JSON object mode with the expected schema
+included in the prompt; existing workflow result validation checks identities, required fields,
+and accepted values. See the official [API reference](https://api-docs.deepseek.com/api/create-chat-completion)
+and [JSON Output guide](https://api-docs.deepseek.com/guides/json_mode/).
 
 ## Notes / limits
 - **Finite boundaries.** Stocks use `C191` market cap as the normal quote/liquidity boundary, not a first-passing membership rule. Validated theme and title/lede anchors may sit outside it only after batched live-profile confirmation. Entity, broad, and term-balanced theme-only GICS/business lanes form the fixed semantic set. Ordinary ETFs come from bounded stock-related, curated-pool, and exact concept-index sources and are hard-capped at 500 after round-robin deduplication. Verified direct-product probes remain outside that cap.

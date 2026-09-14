@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import ssl
 from dataclasses import dataclass
 from pathlib import Path
-
-from ainvest_auth import c_side_ca_file, c_side_cookie_values, c_side_verify_tls
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = REPO_ROOT / "Skills" / "env.json"
@@ -50,7 +49,17 @@ class QuoteConfig:
         """Build the configured quote TLS context."""
         if not self.verify_tls:
             return ssl._create_unverified_context()
-        return ssl.create_default_context(cafile=self.ca_file or None)
+        context = ssl.create_default_context(cafile=self.ca_file or None)
+        if not self.ca_file:
+            # Python.org macOS builds can lack the OpenSSL certificate symlink.
+            # Supplement that store with certifi while keeping verification on.
+            try:
+                import certifi
+            except ImportError:
+                pass
+            else:
+                context.load_verify_locations(cafile=certifi.where())
+        return context
 
 
 def _load_env(env_path: Path | None = None) -> dict:
@@ -131,19 +140,31 @@ def load_llm_config(env: dict | None = None) -> LLMConfig:
         # A direct base URL keeps a single-environment profile (for example the
         # office-Wi-Fi gateway) compact while preserving multi-environment
         # production profiles.
-        if not profile.get("base_url"):
+        base_url = profile.get("base_url") or (
+            "https://api.deepseek.com" if provider == "deepseek" else None
+        )
+        if not base_url:
             raise ValueError("selected LLM profile has no base_url")
-        base = str(profile["base_url"]).rstrip("/")
+        base = str(base_url).rstrip("/")
     protocols = profile.get("protocols", {})
     request = {
         **(profile.get("request") or profile.get("auth") or {}),
         **(selected_environment.get("request") or {}),
     }
+    api_key = selected_environment.get("api_key", profile.get("api_key", ""))
+    if provider == "deepseek":
+        api_key = os.environ.get("DEEPSEEK_API_KEY") or api_key
+    completion_path = protocols.get(
+        "chat_completions",
+        "chat/completions" if provider == "deepseek" else "v1/chat/completions",
+    )
     return LLMConfig(
-        base_url=f"{base}/{protocols.get('chat_completions', 'v1/chat/completions')}",
-        api_key=selected_environment.get("api_key", profile.get("api_key", "")),
+        base_url=f"{base}/{completion_path.lstrip('/')}",
+        api_key=api_key,
         model=selected_environment.get(
-            "default_model", profile.get("default_model", "gpt-5.6-sol")
+            "default_model", profile.get(
+                "default_model", "deepseek-flash" if provider == "deepseek" else "gpt-5.6-sol"
+            )
         ),
         timeout=float(selected_environment.get(
             "timeout_seconds", profile.get("timeout_seconds", 600)
@@ -154,6 +175,7 @@ def load_llm_config(env: dict | None = None) -> LLMConfig:
         trace_header=selected_environment.get(
             "trace_header", profile.get("trace_header")
         ),
+        thinking=request.get("thinking"),
         messages_url=f"{base}/{protocols.get('messages', 'v1/messages')}",
         models_url=f"{base}/{protocols.get('models', 'models')}",
         reasoning_effort=selected_environment.get(
@@ -191,10 +213,16 @@ def load_quote_config(env: dict | None = None) -> QuoteConfig:
     headers = _default_headers(env)
     auth = profile.get("auth", env.get("scenes", {}).get(scene, {}).get("auth", {}))
 
-    ca_file = c_side_ca_file(env) if scene == "c" else None
-    verify_tls = c_side_verify_tls(env) if scene == "c" else True
+    ca_file = str(auth["ca_file"]) if scene == "c" and auth.get("ca_file") else None
+    verify_tls = bool(auth.get("verify_tls", True)) if scene == "c" else True
     if scene == "c":
-        sessionid, userid = c_side_cookie_values(env)
+        sessionid = str(profile.get("sessionid", env.get("sessionid", "")))
+        userid = str(profile.get("userid", env.get("userid", "")))
+        if not sessionid or not userid:
+            raise ValueError(
+                f"C-side quote profile {profile_name!r} requires manually configured "
+                "sessionid and userid"
+            )
         template = auth.get("cookie_value_template", "sessionid={sessionid}; userid={userid}")
         headers[auth.get("header", "Cookie")] = template.format(
             sessionid=sessionid, userid=userid

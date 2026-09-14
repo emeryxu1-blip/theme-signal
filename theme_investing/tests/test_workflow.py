@@ -1,6 +1,8 @@
 """Unit + mocked end-to-end tests. Run: python3 tests/test_workflow.py"""
 
 import argparse
+import contextlib
+import io
 import json
 import os
 import re
@@ -19,7 +21,8 @@ from etf_preselection import (apply_unified_etf_scores, compose_output_etfs,
                               match_theme_pools, preselect_etfs,
                               rerank_with_component_holdings,
                               select_output_etfs)
-from workflow import ThemeWorkflow, _taxonomy_match_score, validate_input
+from workflow import (SelectionUniverseError, StockRationaleError, ThemeWorkflow,
+                      _taxonomy_match_score, validate_input)
 from marketcode_resolver import MarketCodeResolver
 
 
@@ -276,8 +279,183 @@ def _fake_relevance(code):
     return 1.0
 
 
+_FAKE_BUSINESS_ROLES = (
+    ("memory-controller silicon", "controller orders"),
+    ("wafer-fabrication equipment for memory chips", "equipment orders"),
+    ("advanced packaging tools for AI memory", "packaging-system orders"),
+    ("data-center interconnects for AI accelerators", "interconnect sales"),
+    ("memory-testing systems", "test-system orders"),
+    ("semiconductor substrates for memory chips", "substrate shipments"),
+    ("chip-design software for memory controllers", "design-software revenue"),
+    ("server power systems for AI data centers", "power-system orders"),
+    ("memory interconnect modules for AI accelerators", "interconnect-module sales"),
+    ("thermal-management equipment for AI servers", "cooling-equipment orders"),
+    ("storage-interface components", "interface-component sales"),
+)
+
+_FAKE_BROKER_PATTERNS = (
+    "{business}; {connection}, so {pathway}.",
+    "{business}; the event reaches this business as {connection}, with a financial result where {pathway}.",
+    "{business}; its operating link is clear because {connection}, creating a route through which {pathway}.",
+    "{business}; {connection} gives the company direct operating leverage, and {pathway}.",
+    "{business}; when {connection}, the resulting product pull means {pathway}.",
+    "{business}; its catalyst exposure runs through {connection}, turning customer activity into a setup where {pathway}.",
+    "{business}; the catalyst matters because {connection}, which supports a financial outcome where {pathway}.",
+    "{business}; demand transmission starts when {connection}; as a result, {pathway}.",
+    "{business}; {connection} creates a distinct commercial channel, allowing the business to benefit as {pathway}.",
+    "{business}; the earnings bridge begins with {connection}, after which {pathway}.",
+    "{business}; this relationship is operational because {connection}, establishing conditions where {pathway}.",
+)
+
+_FAKE_BROKER_ZH_PATTERNS = (
+    "{name}主营{business}；{connection}，因此{tail}。",
+    "{name}经营{business}；由于{connection}，因此{tail}。",
+    "{name}提供{business}；{connection}，从而{tail}。",
+    "{name}专注于{business}；{connection}，将{tail}。",
+    "{name}旗下核心业务包括{business}；{connection}，并可{tail}。",
+    "{name}经营{business}；由于{connection}，同时{tail}。",
+    "{name}主要经营{business}；随着{connection}，可{tail}。",
+    "{name}从事{business}；{connection}，从而{tail}。",
+    "{name}提供{business}；{connection}，直接{tail}。",
+    "{name}运营{business}；{connection}，因此{tail}。",
+    "{name}开发{business}；{connection}，从而{tail}。",
+)
+
+
+def _fake_candidate_evidence(code, name="", business="", *, bearish=False):
+    """Ground one deterministic mock case so strict broker prose stays factual."""
+    ticker = code.partition(":")[2]
+    if ticker == "NVDA":
+        role, driver = (
+            "AI accelerator processors that use high-bandwidth memory",
+            "accelerator orders",
+        )
+    elif ticker == "MU":
+        role, driver = "high-bandwidth memory chips", "HBM orders"
+    else:
+        digits = "".join(char for char in ticker if char.isdigit())
+        index = int(digits) if digits else sum(ord(char) for char in ticker)
+        role, driver = _FAKE_BUSINESS_ROLES[index % len(_FAKE_BUSINESS_ROLES)]
+    if business:
+        # Keep the mocked relationship tied to the supplied live-profile fact;
+        # random product roles would now (correctly) fail the grounding gate.
+        role, driver = business, "product orders"
+    company = name or ticker or code
+    business_fact = (
+        f"{company}'s business is {business}"
+        if business and company.casefold() not in business.casefold()
+        else business or f"{company} supplies {role}"
+    )
+    if bearish:
+        connection = f"Lower event-driven spending reduces demand for {role}"
+        pathway = f"Fewer {driver} can pressure revenue and earnings"
+        effect = "negative"
+    else:
+        connection = f"Event-driven capacity growth increases demand for {role}"
+        pathway = f"More {driver} can lift revenue and earnings"
+        effect = "positive"
+    return business_fact, connection, pathway, effect
+
+
+def _fake_stock_score(line, score, *, bearish=False, event_phrase=""):
+    parts = [part.strip() for part in line.split("|")]
+    code = parts[0]
+    candidate_id = parts[1] if len(parts) > 1 else ""
+    name = parts[2] if len(parts) > 2 else code.partition(":")[2]
+    business = next(
+        (part.partition("=")[2] for part in parts if part.startswith("business=")),
+        "",
+    )
+    business_fact, connection, pathway, effect = _fake_candidate_evidence(
+        code, name, business, bearish=bearish,
+    )
+    if event_phrase:
+        connection = (
+            f"{event_phrase} reduces demand for {business_fact}"
+            if bearish else
+            f"{event_phrase} increases demand for {business_fact}"
+        )
+    return {
+        "candidate_id": candidate_id,
+        "market_code": code,
+        "theme_relevance": score,
+        "article_support": 0,
+        "exposure_type": "direct",
+        "confidence": 0.9,
+        "impact_channel": "revenue_demand",
+        "theme_specificity": "company_specific",
+        "materiality": "high",
+        "evidence_strength": "explicit",
+        "reason": f"{business_fact}; {connection}",
+        "article_reason": "not mentioned",
+        "public_relation_score": score,
+        "public_relation_confidence": 0.9,
+        "relation_type": "direct",
+        "directional_effect": effect,
+        "business_fact": business_fact,
+        "theme_connection": connection,
+        "financial_pathway": pathway,
+        "evidence_basis": "derived" if event_phrase or not business else "company_profile",
+    }
+
+
+def _fake_narrative_response(user):
+    """Return distinct identity-preserving mock copy for stock and ETF records."""
+    records = json.loads(
+        user.split("Records (JSON):\n", 1)[1]
+        .split("\n\nWriting requirements:", 1)[0]
+    )
+    bearish = "Internal theme direction: bearish" in user
+    items = []
+    for record in records:
+        code = record["market_code"]
+        name = record.get("name") or code.partition(":")[2]
+        candidate_id = record.get("candidate_id") or code
+        if not any(key in record for key in (
+            "business fact", "company business", "event relationship",
+            "financial pathway", "structural exposure evidence",
+        )):
+            # Preserve the existing ETF fallback coverage in broad E2E tests.
+            continue
+        business = record.get("business fact") or record.get("company business") or ""
+        business_fact = business
+        connection = record.get("event relationship") or ""
+        pathway = record.get("financial pathway") or ""
+        candidate_digits = "".join(
+            char for char in str(candidate_id) if char.isdigit())
+        pattern_index = (
+            int(candidate_digits)
+            if candidate_digits else sum(ord(char) for char in code)
+        ) % len(_FAKE_BROKER_PATTERNS)
+        en = _FAKE_BROKER_PATTERNS[pattern_index].format(
+            business=business_fact,
+            connection=connection.lower(),
+            pathway=pathway.lower(),
+        )
+        tail = (
+            "拖累订单、收入和盈利"
+            if bearish else "提升订单、收入和盈利"
+        )
+        zh = _FAKE_BROKER_ZH_PATTERNS[pattern_index].format(
+            name=name,
+            business=business_fact,
+            connection=connection,
+            tail=tail,
+        )
+        items.append({
+            "candidate_id": candidate_id,
+            "market_code": code,
+            "theme_rationale": {"type": "multilingual", "en": en, "zh": zh},
+        })
+    return {"items": items}
+
+
 class FakeLLM:
     def chat_json(self, system, user, **kw):
+        if system == workflow_module.prompts.EVENT_ECOSYSTEM_SYS:
+            return {"entities": []}
+        if system == workflow_module.prompts.NARRATIVE_SYS:
+            return _fake_narrative_response(user)
         if "Return JSON with keys" in user:
             return {"theme_cn": "AI 内存", "summary": "s", "thesis": "t",
                     "theme_direction": "bullish",
@@ -286,16 +464,22 @@ class FakeLLM:
                     "etf_exposure_terms": ["semiconductors", "AI memory"],
                     "second_order": [], "false_positives": [], "keywords": ["memory"]}
         if "Score each candidate" in user:
+            input_theme_match = re.search(
+                r'"input_theme"\s*:\s*"([^"]+)"', user)
+            event_phrase = (
+                input_theme_match.group(1)
+                if input_theme_match else "AI memory expansion"
+            )
             out = []
             for line in user.splitlines():
                 if "|" in line and ":" in line.split("|")[0]:
                     code = line.split("|")[0].strip()
-                    out.append({"market_code": code, "ai_relevance": _fake_relevance(code),
-                                "exposure_type": "direct", "confidence": 0.9,
-                                "impact_channel": "revenue_demand",
-                                "theme_specificity": "company_specific",
-                                "materiality": "high", "evidence_strength": "explicit",
-                                "reason": "r"})
+                    row = _fake_stock_score(
+                        line, _fake_relevance(code),
+                        bearish='"theme_direction": "bearish"' in user,
+                        event_phrase=event_phrase,
+                    )
+                    out.append(row)
             return out
         if "FAQ" in user or "faq" in system.lower():
             return [{"question": f"Q{i}", "answer": f"A{i}"} for i in range(5)]
@@ -372,14 +556,24 @@ class FakeQuotes:
             "leverage": 3, "direction": "Short", "weights": {"185:NVDA": 10.0},
         },
     }
-    def iter_ranked(self, selector, indicators, *, sort_pos=0, order="desc", page_size=1000):
+    def iter_ranked(self, selector, indicators, *, sort_pos=0, order="desc",
+                    page_size=1000, strict=False):
         is_stock = selector.get("value") == ["C191"]
         pre = "185:S" if is_stock else "185:E"
         specials = ["185:NVDA", "185:MU"] if is_stock else ["185:SMH", "185:SOXX"]
         codes = specials + [f"{pre}{i}" for i in range(self._POOL)]
         for i, c in enumerate(codes):
-            yield {"code": c, "rank": i + 1,
-                   "values": {indicators[0]["req_unique_id"]: 1e12 - i}}
+            values = {indicators[0]["req_unique_id"]: 1e12 - i}
+            if is_stock:
+                name = self.name_of(c)
+                business, _, _, _ = _fake_candidate_evidence(c, name)
+                values.update({
+                    "name": name,
+                    "company_introduction": business,
+                    "sector": "Technology",
+                    "industry": "Theme Components",
+                })
+            yield {"code": c, "rank": i + 1, "values": values}
     def rank_universe(self, selector, indicators, *, total, sort_pos=0, **kw):
         import itertools
         return list(itertools.islice(
@@ -473,6 +667,10 @@ class ScriptedLLM:
         self.rel_by_code = rel_by_code
         self.scored_codes = []
     def chat_json(self, system, user, **kw):
+        if system == workflow_module.prompts.EVENT_ECOSYSTEM_SYS:
+            return {"entities": []}
+        if system == workflow_module.prompts.NARRATIVE_SYS:
+            return _fake_narrative_response(user)
         if "Return JSON with keys" in user:
             return {"theme_cn": "AI 内存", "summary": "s", "thesis": "t",
                     "theme_direction": "bullish",
@@ -484,47 +682,84 @@ class ScriptedLLM:
                 if "|" in line and ":" in line.split("|")[0]:
                     code = line.split("|")[0].strip()
                     self.scored_codes.append(code)
-                    out.append({"market_code": code,
-                                "ai_relevance": self.rel_by_code.get(code, 1.0),
-                                "exposure_type": "direct", "confidence": 0.9,
-                                "impact_channel": "revenue_demand",
-                                "theme_specificity": "company_specific",
-                                "materiality": "high", "evidence_strength": "explicit",
-                                "reason": "r"})
+                    out.append(_fake_stock_score(
+                        line, self.rel_by_code.get(code, 1.0)))
             return out
         return []
 
 
 def _rows(*codes):
-    return [{"code": c, "name": c.split(":")[-1], "rank": i + 1}
-            for i, c in enumerate(codes)]
+    rows = []
+    for index, code in enumerate(codes, 1):
+        name = code.split(":")[-1]
+        business, _, _, _ = _fake_candidate_evidence(code, name)
+        rows.append({
+            "code": code,
+            "name": name,
+            "rank": index,
+            "company_introduction": business,
+        })
+    return rows
 
 
 def test_screen_ranks_semantics_before_market_cap_order():
     # Threshold 3.3: later, stronger evidence must displace an earlier marginal pass.
     rel = {"169:A": 5.0, "169:B": 3.0, "169:C": 3.3, "169:D": 4.0, "169:E": 3.9}
     llm = ScriptedLLM(rel)
-    wf = ThemeWorkflow(llm, FakeQuotes(), {"relevance_batch": 10, "relevance_threshold": 3.3})
+    wf = ThemeWorkflow(llm, FakeQuotes(), {
+        "relevance_batch": 10,
+        "relevance_threshold": 3.3,
+        "etf_evidence_stock_limit": 3,
+    })
     rows = _rows("169:A", "169:B", "169:C", "169:D", "169:E")
     chosen = wf.screen_until_target(rows, {}, {}, target=3, kind="stocks")
     assert [c["code"] for c in chosen] == ["169:A", "169:D", "169:E"]
-    assert all(c["ai_relevance"] >= 3.3 for c in chosen)
+    assert [c["code"] for c in wf._last_stock_evidence] == [
+        "169:A", "169:D", "169:E",
+    ]
+    assert all(c["ai_relevance"] >= 3.3 for c in wf._last_stock_evidence)
     assert len(llm.scored_codes) == 5
 
 
 def test_screen_excludes_momentum_from_priority_but_fills_public_stock_target():
-    # Large moves and high RVOL cannot admit names as strict evidence, but the
-    # public contract still fills with the best available names when needed.
+    # Large moves and high RVOL cannot outrank relationship evidence, but the
+    # frozen basket still fills from the remaining real candidates.
     rel = {"169:FMX": 1.0, "169:GGB": 3.0, "185:MU": 4.5}
-    llm = ScriptedLLM(rel)
+    class GroundedRelationshipLLM(ScriptedLLM):
+        def chat_json(self, system, user, **kw):
+            if "Score each candidate" not in user:
+                return super().chat_json(system, user, **kw)
+            output = []
+            for line in user.splitlines():
+                if "|" not in line or ":" not in line.split("|")[0]:
+                    continue
+                code = line.split("|")[0].strip()
+                self.scored_codes.append(code)
+                output.append(_fake_stock_score(
+                    line,
+                    self.rel_by_code.get(code, 1.0),
+                    event_phrase="AI memory component capacity growth",
+                ))
+            return output
+
+    llm = GroundedRelationshipLLM(rel)
     wf = ThemeWorkflow(llm, FakeQuotes(), {"relevance_batch": 10, "relevance_threshold": 3.3})
     rows = _rows("169:FMX", "169:GGB", "185:MU")
     rows[0].update({"chg_pct": -40.0, "rvol_event": 8.0, "abnormal_return": -35.0})
     rows[1].update({"chg_pct": 35.0, "rvol_event": 7.0, "abnormal_return": 30.0})
     rows[2].update({"chg_pct": 1.0, "rvol_event": 1.0, "abnormal_return": 0.0})
-    chosen = wf.screen_until_target(rows, {}, {}, target=8, kind="stocks")
+    chosen = wf.screen_until_target(
+        rows,
+        {
+            "theme_direction": "bullish",
+            "input_theme": "AI memory component capacity growth",
+        },
+        {},
+        target=3,
+        kind="stocks",
+    )
     assert [c["code"] for c in chosen] == ["185:MU", "169:GGB", "169:FMX"]
-    assert all(c["weak_theme_fallback"] for c in chosen[1:])
+    assert all("weak_theme_fallback" not in candidate for candidate in chosen)
     assert wf._last_stock_evidence == [chosen[0]]
 
 
@@ -536,21 +771,28 @@ def test_screen_scans_deeper_until_target_met():
     rows = _rows("169:A", "169:B", "169:C", "169:D", "169:Z")
     chosen = wf.screen_until_target(rows, {}, {}, target=1, kind="stocks")
     assert [c["code"] for c in chosen] == ["169:Z"]
+    assert [c["code"] for c in wf._last_stock_evidence] == ["169:Z"]
     assert len(llm.scored_codes) == 5  # scanned the whole universe to find it
 
 
 def test_screen_scores_fixed_universe_before_truncation():
     rel = {c: 4.0 for c in [f"185:S{i}" for i in range(50)]}
     llm = ScriptedLLM(rel)
-    wf = ThemeWorkflow(llm, FakeQuotes(), {"relevance_batch": 20, "relevance_threshold": 3.3})
+    wf = ThemeWorkflow(llm, FakeQuotes(), {
+        "relevance_batch": 20,
+        "relevance_threshold": 3.3,
+        "etf_evidence_stock_limit": 8,
+    })
     rows = _rows(*[f"185:S{i}" for i in range(50)])
     chosen = wf.screen_until_target(rows, {}, {}, target=8, kind="stocks")
-    assert len(chosen) == 8
+    assert [c["code"] for c in chosen] == [f"185:S{i}" for i in range(8)]
+    assert len(wf._last_stock_evidence) == 8
     assert len(llm.scored_codes) == 50
 
 
 def test_screen_limit_is_an_exact_per_class_ceiling():
-    # With no qualifying rows, the scan must consume exactly N candidates and stop.
+    # The scan consumes exactly N candidates and freezes a full basket even when
+    # all scored relationships are weak.
     for limit in (100, 1000):
         for kind in ("stocks", "ETFs"):
             llm = ScriptedLLM({})
@@ -561,23 +803,21 @@ def test_screen_limit_is_an_exact_per_class_ceiling():
             rows = _rows(*[f"185:{kind[0]}{i}" for i in range(limit + 25)])
             chosen = wf.screen_until_target(
                 rows, {}, {}, target=8, kind=kind, cap=limit)
-            if kind == "stocks":
-                assert len(chosen) == 8
-                assert all(candidate.get("weak_theme_fallback") for candidate in chosen)
-            else:
-                assert chosen == []
+            assert len(chosen) == 8
+            assert [row["code"] for row in chosen] == [
+                f"185:{kind[0]}{i}" for i in range(8)
+            ]
             assert len(llm.scored_codes) == limit
 
 
-def test_screen_stops_at_max_scan_and_returns_partial():
-    # Stock output fills from the bounded scan; ETF screening remains fail-closed.
+def test_screen_stops_at_max_scan_and_fills_from_scanned_universe():
+    # A bounded scan still freezes an exact basket from the real rows it saw.
     llm = ScriptedLLM({})  # everything defaults to relevance 1.0
     wf = ThemeWorkflow(llm, FakeQuotes(),
                        {"relevance_batch": 20, "relevance_threshold": 2.5, "max_scan": 40})
     rows = _rows(*[f"185:S{i}" for i in range(500)])
     chosen = wf.screen_until_target(rows, {}, {}, target=8, kind="stocks")
-    assert len(chosen) == 8
-    assert all(candidate.get("weak_theme_fallback") for candidate in chosen)
+    assert [row["code"] for row in chosen] == [f"185:S{i}" for i in range(8)]
     assert len(llm.scored_codes) == 40  # bounded by max_scan, not the 500-name universe
 
 
@@ -588,6 +828,7 @@ def test_screen_max_scan_unbounded_when_zero():
     rows = _rows(*[f"185:S{i}" for i in range(10)])
     chosen = wf.screen_until_target(rows, {}, {}, target=1, kind="stocks")
     assert [c["code"] for c in chosen] == ["185:S9"]
+    assert [c["code"] for c in wf._last_stock_evidence] == ["185:S9"]
     assert len(llm.scored_codes) == 10  # 0 disables the cap → scans until found
 
 
@@ -651,13 +892,11 @@ def test_score_relevance_handles_wrapped_json_and_code_variants():
     whitespace/case; both must still resolve, not silently become relevance 1."""
     class WrappingLLM:
         def chat_json(self, system, user, **kw):
-            return {"results": [
-                {"market_code": " 185:mu ", "ai_relevance": 5,
-                 "exposure_type": "direct", "confidence": 0.9, "reason": "HBM",
-                 "impact_channel": "revenue_demand",
-                 "theme_specificity": "company_specific", "materiality": "high",
-                 "evidence_strength": "explicit"},
-            ]}
+            line = next(line for line in user.splitlines()
+                        if "|" in line and ":" in line.split("|")[0])
+            row = _fake_stock_score(line, 5)
+            row["market_code"] = " 185:mu "
+            return {"results": [row]}
     wf = ThemeWorkflow(WrappingLLM(), FakeQuotes())
     scores = wf.score_relevance({"thesis": "HBM"},
                                 [{"code": "185:MU", "name": "Micron", "rvol_event": 1,
@@ -690,15 +929,11 @@ def test_score_relevance_provider_error_fails_batch_closed_and_continues():
             self.calls += 1
             if self.calls == 1:
                 raise GatewayBadRequest("request rejected by gateway")
-            codes = [line.split("|")[0].strip() for line in user.splitlines()
-                     if "|" in line and ":" in line.split("|")[0]]
-            return [{
-                "market_code": code, "ai_relevance": 5,
-                "exposure_type": "direct", "confidence": 1,
-                "impact_channel": "revenue_demand",
-                "theme_specificity": "company_specific", "materiality": "high",
-                "evidence_strength": "explicit", "reason": "direct",
-            } for code in codes]
+            return [
+                _fake_stock_score(line, 5)
+                for line in user.splitlines()
+                if "|" in line and ":" in line.split("|")[0]
+            ]
 
     logs = []
     original_log = workflow_module._log
@@ -738,25 +973,30 @@ def test_stock_narrative_excludes_internal_inputs_and_includes_evidence():
         def chat_json(self, system, user, **kw):
             self.system = system
             self.user = user
-            return [{
+            return {"items": [{
+                "candidate_id": "S0001",
                 "market_code": "185:MU",
                 "theme_rationale": {
                     "type": "multilingual",
                     "en": (
-                        "Micron sells HBM used in AI accelerators, linking demand to memory revenue. "
-                        "The key watchpoint is whether HBM growth becomes material in segment results."
+                        "Micron sells HBM memory chips; HBM serves AI accelerator memory "
+                        "demand and can lift memory revenue and earnings."
                     ),
                     "zh": (
-                        "美光销售用于AI加速器的HBM，其主题传导路径主要体现在存储业务收入。"
-                        "关键观察点是HBM增长能否在分部业绩中形成实质性贡献。"
+                        "Micron主营HBM存储芯片；AI加速器需求增长可提升"
+                        "存储业务收入和盈利。"
                     ),
                 },
-            }]
+            }]}
 
     llm = CapturingLLM()
     wf = ThemeWorkflow(llm, FakeQuotes())
     chosen = [{"code": "185:MU", "name": "Micron", "exposure_type": "direct",
                "ai_relevance": 5, "confidence": 1.0,
+               "company_introduction": "Micron sells DRAM and HBM memory chips",
+               "business_fact": "Micron sells HBM memory chips",
+               "theme_connection": "HBM serves AI accelerator memory demand",
+               "financial_pathway": "Higher HBM demand can lift memory revenue and earnings",
                "reason": "HBM products serve AI accelerator memory demand",
                "rvol_event": 2.4, "abnormal_return": 4.1,
                "volume_confirmed": True, "chg_pct": 3.0}]
@@ -766,28 +1006,92 @@ def test_stock_narrative_excludes_internal_inputs_and_includes_evidence():
         chosen, "stock")
 
     (record,) = _narrative_records(llm.user)
-    assert set(record) == {"market_code", "name", "exposure evidence"}
-    assert record["exposure evidence"] == "HBM products serve AI accelerator memory demand"
+    assert set(record) == {
+        "candidate_id", "market_code", "name", "company business",
+        "business fact", "event relationship", "financial pathway",
+        "structural exposure evidence",
+    }
+    assert record["structural exposure evidence"] == (
+        "HBM products serve AI accelerator memory demand")
     serialized = json.dumps(record)
     for internal in ("ai_relevance", "exposure_type", "confidence", "rvol",
                      "abnormal_return", "volume_confirmed", "chg_pct", "score"):
         assert internal not in serialized
     assert "never expose or refer to internal scores" in llm.system
     assert "relevance 5.0" in llm.system
+    assert "seasoned sell-side equity broker" in llm.system
+    assert "20-45 English words" in llm.user
+    assert "do not spend words saying it is" in llm.user
+    assert "write a balanced theme rationale" not in llm.user
+    assert "35-70 words" not in llm.user
     assert '"type": "multilingual"' in llm.user
     assert '"en"' in llm.user and '"zh"' in llm.user
     rationale = result["185:MU"]["theme_rationale"]
     assert rationale["type"] == "multilingual"
     assert rationale["en"].startswith("Micron sells HBM")
-    assert rationale["zh"].startswith("美光销售")
+    assert rationale["zh"].startswith("Micron主营")
+
+
+def test_stock_narrative_uses_only_literal_verified_article_evidence():
+    candidate = {
+        "code": "185:MU", "name": "Micron",
+        "company_introduction": "Micron sells DRAM and HBM memory chips",
+        "business_fact": "Micron sells HBM memory chips",
+        "theme_connection": "HBM serves AI accelerator memory demand",
+        "financial_pathway": "Higher HBM demand can lift revenue and earnings",
+        "article_reason": "Invented scoring-model customer claim",
+        "article_anchor_evidence": "Invented extraction-model contract claim",
+        "event_operating_evidence": "Invented ecosystem-model partnership claim",
+        "verified_article_evidence": "The article says Micron supplies HBM memory.",
+    }
+    record = ThemeWorkflow._narrative_record(candidate, "stock", {
+        "input_theme": "AI memory demand",
+        "catalyst": {"what_happened": "Invented catalyst claim"},
+        "operating_evidence": [{
+            "entity_name": "Micron", "fact": "Invented operating claim",
+            "directional_pathway": "Invented pathway",
+        }],
+    })
+    serialized = json.dumps(record)
+    assert record["verified article evidence"] == (
+        "The article says Micron supplies HBM memory.")
+    assert record["event/theme"] == "AI memory demand"
+    for unsafe in (
+        "Invented scoring-model", "Invented extraction-model",
+        "Invented ecosystem-model", "Invented catalyst",
+        "Invented operating", "Invented pathway",
+    ):
+        assert unsafe not in serialized
+
+
+def test_verified_candidate_article_evidence_returns_source_text_not_model_hint():
+    candidate = {"code": "185:MU", "name": "Micron Technology"}
+    entity = {
+        "name": "Micron", "ticker": "MU",
+        "operating_evidence": (
+            "Micron has an invented exclusive customer contract worth $9 billion."),
+    }
+    evidence = workflow_module._verified_candidate_article_evidence(
+        candidate,
+        {
+            "title": "Micron expands HBM memory output",
+            "text": "Micron said AI accelerator demand is increasing HBM orders.",
+        },
+        entity,
+    )
+    assert "Micron expands HBM memory output" in evidence
+    assert "AI accelerator demand is increasing HBM orders" in evidence
+    assert "exclusive customer contract" not in evidence
+    assert "$9 billion" not in evidence
 
 
 def test_etf_narrative_uses_raw_holdings_without_aggregate_calculations():
     class CapturingLLM:
         def chat_json(self, system, user, **kw):
-            self.user = user
-            return [{
-                "market_code": "185:SMH",
+                self.user = user
+                return [{
+                    "candidate_id": "S0001",
+                    "market_code": "185:SMH",
                 "theme_rationale": {
                     "type": "multilingual",
                     "en": (
@@ -807,10 +1111,11 @@ def test_etf_narrative_uses_raw_holdings_without_aggregate_calculations():
         "code": "185:SMH", "name": "VanEck Semiconductor ETF",
         "static_theme_exposure": 0.8, "preselect_score": 0.8,
         "direction": "Long", "leverage": 1.0,
-        "theme_weight_pct": 35.2, "theme_breadth": 3,
-        "matched_holdings": [
-            {"code": "185:MU", "ticker": "MU", "weight_pct": 8.21},
-            {"code": "185:AMAT", "ticker": "AMAT", "weight_pct": 6.45},
+            "theme_weight_pct": 35.2, "theme_breadth": 3,
+            "matched_holdings": [
+                {"code": "185:MU", "ticker": "MU", "name": "Micron",
+                 "weight_pct": 8.21},
+                {"code": "185:AMAT", "ticker": "AMAT", "weight_pct": 6.45},
         ],
         "pool_labels": ["Semiconductor ETFs"],
         "fund_niche": "Semiconductors",
@@ -850,13 +1155,13 @@ def test_internal_narrative_is_rejected_and_uses_safe_stock_fallback():
         "zh": "内部评分显示相关性5.0，因此该股票值得关注。",
     }}}
     (item,) = wf._assemble(chosen, narrative, "2026-07-09")
-    rationale = item["theme_rationale"]
-    assert rationale["type"] == "multilingual"
-    assert "relevance" not in rationale["en"].lower()
-    assert "ai_relevance" not in rationale["en"]
-    assert "product or business-segment exposure" in rationale["en"]
-    assert "内部评分" not in rationale["zh"]
-    assert "现有资料" in rationale["zh"]
+    fallback = item["theme_rationale"]
+    assert fallback != narrative["185:MU"]["theme_rationale"]
+    assert "internal" not in fallback["en"].lower()
+    assert "relevance" not in fallback["en"].lower()
+    assert any(term in fallback["en"].lower() for term in (
+        "revenue", "margin", "earnings", "sales", "profits",
+    ))
     assert ThemeWorkflow._validated_rationale_text(
         "The fund has combined exposure of 35.2% across the selected holdings.") is None
     assert ThemeWorkflow._validated_theme_rationale({
@@ -899,6 +1204,85 @@ def test_rationale_rejects_selection_fit_and_method_language():
     ):
         assert ThemeWorkflow._validated_theme_rationale({
             "type": "multilingual", "en": safe_en, "zh": text}) is None
+
+
+def test_rationale_rejects_redundant_sensitivity_boilerplate():
+    assert ThemeWorkflow._validated_theme_rationale({
+        "type": "multilingual",
+        "en": (
+            "Micron has memory exposure, while available disclosures do not "
+            "quantify the sensitivity."
+        ),
+        "zh": "美光拥有存储业务敞口，但现有资料尚未量化敏感度。",
+    }) is None
+
+
+def test_weak_theme_fallback_preserves_valid_broker_rationale():
+    wf = ThemeWorkflow(FakeLLM(), FakeQuotes())
+    candidate = {
+        "code": "185:MU", "name": "Micron", "weak_theme_fallback": True,
+        "ai_relevance": 3, "confidence": 0.6, "exposure_type": "direct",
+        "reason": "HBM products supply AI accelerators and capture infrastructure demand",
+    }
+    supplied = {
+        "type": "multilingual",
+        "en": (
+            "Micron's HBM products supply AI accelerators, positioning its memory "
+            "business to turn stronger infrastructure orders into revenue and margin upside."
+        ),
+        "zh": (
+            "美光的HBM产品用于AI加速器，有望承接基础设施需求增长，并将订单提升"
+            "转化为收入和利润率上行。"
+        ),
+    }
+
+    assert wf._validated_candidate_rationale(candidate, supplied) == supplied
+    (item,) = wf._assemble(
+        [candidate], {"185:MU": {"theme_rationale": supplied}},
+        "2026-07-09", "bullish",
+    )
+    assert item["theme_rationale"] == supplied
+
+
+def test_weak_theme_fallback_uses_same_code_broker_copy_when_narrative_is_unsafe():
+    wf = ThemeWorkflow(FakeLLM(), FakeQuotes())
+    candidate = {
+        "code": "185:MU", "name": "Micron", "weak_theme_fallback": True,
+        "ai_relevance": 1, "confidence": 0.3, "exposure_type": "unclear",
+        "reason": "No clear earnings link to the theme",
+    }
+    unsafe = {
+        "type": "multilingual",
+        "en": "The model selected Micron because its internal relevance score is high.",
+        "zh": "内部评分较高，因此模型筛选了美光。",
+    }
+
+    (item,) = wf._assemble(
+        [candidate], {"185:MU": {"theme_rationale": unsafe}},
+        "2026-07-09", "bullish",
+    )
+    rationale = item["theme_rationale"]
+    assert "secondary watchlist" not in rationale["en"].lower()
+    assert "high-conviction" not in rationale["en"].lower()
+    assert "needs to emerge" not in rationale["en"].lower()
+    assert any(term in rationale["en"].lower() for term in (
+        "revenue", "margin", "earnings", "profits",
+    ))
+
+
+def test_stock_fallback_without_event_evidence_is_concise_broker_copy():
+    rationale = ThemeWorkflow._fallback_theme_rationale({
+        "code": "185:XYZ", "name": "Example Corp", "reason": "",
+        "company_introduction": "Example Corp sells industrial equipment",
+    }, "bullish", theme="industrial automation")
+    assert rationale["en"].startswith(
+        "Example Corp (XYZ): Example Corp sells industrial equipment"
+    )
+    assert "industrial automation" in rationale["en"]
+    assert any(term in rationale["en"].lower() for term in (
+        "revenue", "margin", "earnings", "profits",
+    ))
+    assert "watchlist" not in rationale["en"].lower()
 
 
 def test_inverse_etf_record_and_fallback_are_objective_and_risk_explicit():
@@ -985,7 +1369,7 @@ def test_low_liquidity_leveraged_public_fallback_keeps_all_bilingual_safeguards(
         "daily reset", "compounding", "path dependence", "concentration risk",
         "low liquidity", "spreads", "trading impact",
     ))
-    assert "NVDA" in zh and "2倍正向" in zh
+    assert "NVDA" in zh and re.search(r"2倍(?:的)?正向", zh)
     assert all(term in zh for term in (
         "每日重置", "复利", "路径依赖", "集中度风险", "流动性", "买卖价差", "交易冲击",
     ))
@@ -1053,15 +1437,17 @@ def test_bearish_fallbacks_preserve_downside_pathways_in_both_languages():
             {"code": "185:NVDA", "ticker": "NVDA", "weight_pct": 10.0},
         ],
     }
-    stock_rationale = ThemeWorkflow._fallback_theme_rationale(stock, "bearish")
     etf_rationale = ThemeWorkflow._fallback_theme_rationale(long_etf, "bearish")
 
-    assert "downside" in stock_rationale["en"].lower()
-    assert "下行" in stock_rationale["zh"]
-    assert "Lower AI infrastructure" not in stock_rationale["zh"]
+    stock_rationale = ThemeWorkflow._fallback_theme_rationale(stock, "bearish")
+    assert any(term in stock_rationale["en"].lower() for term in (
+        "pressure", "weaker", "reduce", "weigh",
+    ))
+    assert any(term in stock_rationale["zh"] for term in (
+        "压低", "承压", "下降", "减少",
+    ))
     assert "declines" in etf_rationale["en"].lower()
     assert "下跌" in etf_rationale["zh"]
-    assert ThemeWorkflow._validated_theme_rationale(stock_rationale) == stock_rationale
     assert ThemeWorkflow._validated_theme_rationale(etf_rationale) == etf_rationale
 
 
@@ -1181,9 +1567,11 @@ def test_inverse_fallback_states_when_reference_fact_is_unavailable():
         "matched_holdings": [],
     }
     rationale = ThemeWorkflow._fallback_theme_rationale(candidate, "bearish")
-    assert "do not name its reference benchmark or underlying" in rationale["en"]
-    assert "未列明其参考基准或标的" in rationale["zh"]
-    assert ThemeWorkflow._validated_candidate_rationale(candidate, rationale) == rationale
+    assert "3x daily inverse mandate" in rationale["en"]
+    assert "约3倍单日反向策略" in rationale["zh"]
+    assert "daily reset" in rationale["en"].lower()
+    assert "path dependence" in rationale["en"].lower()
+    assert "S&P 500" not in rationale["en"]
 
     invented_reference = {"type": "multilingual", "en": (
         "The fund seeks 3x daily inverse exposure to the S&P 500. Daily reset and "
@@ -1211,10 +1599,13 @@ def test_malformed_narrative_response_uses_safe_fallback():
     narrative = wf.narrate(
         {"theme": "AI memory"}, {"summary": "", "thesis": ""}, chosen, "stock")
     assert narrative == {}
-    (item,) = wf._assemble(chosen, narrative, "2026-07-09")
-    assert "product or business-segment exposure" in item["theme_rationale"]["en"]
-    assert "产品或业务分部敞口" in item["theme_rationale"]["zh"]
-    assert "why_bullish" not in item
+    (item,) = wf._assemble(
+        chosen, narrative, "2026-07-09", theme="AI memory")
+    assert item["market_code"] == "185:MU"
+    assert "Micron" in item["theme_rationale"]["en"]
+    assert any(term in item["theme_rationale"]["en"].lower() for term in (
+        "revenue", "margin", "earnings", "profits",
+    ))
 
 
 def test_missing_etf_narrative_fallback_omits_aggregate_math():
@@ -1280,7 +1671,7 @@ def test_end_to_end_mocked():
     res = wf.run({"theme": "AI memory", "date": "2026-07-09", "url": "https://example.com/x"})
     assert res["theme_cn"] == "AI 内存"
     assert len(res["ThemeStocks"]) == 8
-    assert 1 <= len(res["ThemeEtfs"]) <= 5
+    assert len(res["ThemeEtfs"]) == 5
     assert 4 <= len(res["ThemeFAQ"]) <= 8
     assert set(res["ThemeStocks"][0]) == {
         "market_code", "theme_rationale", "Theme exposure", "event_date"}
@@ -1311,22 +1702,27 @@ class _StockLedThemeLLM:
         self.stock_codes = set(stock_codes)
 
     def chat_json(self, system, user, **kw):
+        if system == workflow_module.prompts.EVENT_ECOSYSTEM_SYS:
+            return {"entities": []}
+        if system == workflow_module.prompts.NARRATIVE_SYS:
+            return _fake_narrative_response(user)
         if "Return JSON with keys" in user:
             return dict(self.brief)
         if "Score each candidate" in user:
-            return [{
-                "market_code": line.split("|")[0].strip(),
-                "ai_relevance": 5,
-                "exposure_type": "direct",
-                "confidence": 0.95,
-                "impact_channel": "revenue_demand",
-                "theme_specificity": "company_specific",
-                "materiality": "high",
-                "evidence_strength": "explicit",
-                "reason": "Directly exposed to the fixture's investment direction.",
-            } for line in user.splitlines()
+            keywords = self.brief.get("keywords") or []
+            input_theme_match = re.search(
+                r'"input_theme"\s*:\s*"([^"]+)"', user)
+            event_phrase = (
+                input_theme_match.group(1) if input_theme_match else
+                str(keywords[0]) if keywords else
+                str(self.brief.get("summary") or self.brief.get("thesis") or "")
+            )
+            return [
+                _fake_stock_score(line, 5, event_phrase=event_phrase)
+                for line in user.splitlines()
                 if "|" in line
-                and line.split("|")[0].strip() in self.stock_codes]
+                and line.split("|")[0].strip() in self.stock_codes
+            ]
         if "FAQ" in user or "faq" in system.lower():
             return [{"question": f"Q{i}", "answer": f"A{i}"}
                     for i in range(4)]
@@ -1381,7 +1777,7 @@ class _StockLedThemeQuotes:
         }
 
     def iter_ranked(self, selector, indicators, *, sort_pos=0, order="desc",
-                    page_size=1000):
+                    page_size=1000, strict=False):
         for rank, stock in enumerate(self.stocks, 1):
             values = {
                 "mktcap": 10_000_000_000 - rank,
@@ -1462,15 +1858,22 @@ def _run_stock_led_theme_fixture(*, theme, brief, stocks, wrapper_code,
 
     original_fetch_article = workflow_module.fetch_article
     workflow_module.fetch_article = lambda url: {
-        "ok": True, "title": theme, "text": theme, "url": url,
+        "ok": True,
+        "title": theme,
+        "text": f"{theme}. {brief.get('summary') or ''}",
+        "url": url,
     }
     try:
         result = ThemeWorkflow(llm, quotes, {
             "stock_universe": len(stocks),
             "stock_candidate_budget": len(stocks),
             "stock_broad_lane": len(stocks),
+            "stock_target": min(8, len(stocks)),
             "etf_universe": 20,
-            "etf_target": 5,
+            # This fixture exposes exactly two ETF products; exact-count
+            # behavior for the default five is covered with the full fake CE
+            # universe elsewhere.
+            "etf_target": 2,
         }).run({
             "theme": theme,
             "date": "2026-07-09",
@@ -1482,8 +1885,8 @@ def _run_stock_led_theme_fixture(*, theme, brief, stocks, wrapper_code,
     expected_item_keys = {
         "market_code", "theme_rationale", "Theme exposure", "event_date",
     }
-    assert 1 <= len(result["ThemeStocks"]) <= min(8, len(stocks))
-    assert 1 <= len(result["ThemeEtfs"]) <= 5
+    assert len(result["ThemeStocks"]) == min(8, len(stocks))
+    assert len(result["ThemeEtfs"]) == 2
     assert {item["market_code"] for item in result["ThemeEtfs"]} == {
         wrapper_code, basket_code,
     }
@@ -1520,9 +1923,9 @@ def _fixture_stocks(specs):
 def test_end_to_end_neocloud_stock_led_etf_discovery_uses_catalog_evidence():
     stocks = _fixture_stocks([
         ("185:CRWV", "CoreWeave", "GPU neocloud capacity provider", "Technology", "Cloud Infrastructure"),
-        ("185:NBIS", "Nebius", "AI cloud compute operator", "Technology", "Cloud Infrastructure"),
-        ("185:VRT", "Vertiv", "Data-center power and cooling", "Industrials", "Data Center Equipment"),
-        ("185:DELL", "Dell", "AI server systems", "Technology", "Computer Hardware"),
+        ("185:NBIS", "Nebius", "AI GPU cloud compute operator", "Technology", "Cloud Infrastructure"),
+        ("185:VRT", "Vertiv", "Electrical power distribution and liquid cooling for GPU data centers", "Industrials", "Data Center Equipment"),
+        ("185:DELL", "Dell", "GPU rack servers for neocloud compute clusters", "Technology", "Computer Hardware"),
     ])
     _run_stock_led_theme_fixture(
         theme="Neocloud GPU capacity",
@@ -1546,8 +1949,8 @@ def test_end_to_end_iran_war_defense_energy_stock_led_etf_discovery():
     stocks = _fixture_stocks([
         ("185:LMT", "Lockheed Martin", "Defense systems contractor", "Industrials", "Aerospace and Defense"),
         ("185:RTX", "RTX", "Missile and aerospace supplier", "Industrials", "Aerospace and Defense"),
-        ("185:XOM", "Exxon Mobil", "Integrated oil producer", "Energy", "Oil and Gas"),
-        ("185:CVX", "Chevron", "Integrated oil producer", "Energy", "Oil and Gas"),
+        ("185:XOM", "Exxon Mobil", "Integrated oil producer with refining and chemicals", "Energy", "Oil and Gas"),
+        ("185:CVX", "Chevron", "Integrated oil and LNG producer with upstream exposure", "Energy", "Oil and Gas"),
     ])
     _run_stock_led_theme_fixture(
         theme="Iran war defense and energy",
@@ -1567,7 +1970,7 @@ def test_end_to_end_iran_war_defense_energy_stock_led_etf_discovery():
     )
 
 
-def test_american_consumer_unavailable_article_returns_cotg_first_and_basket():
+def test_american_consumer_unavailable_article_still_freezes_exact_baskets():
     stocks = _fixture_stocks([
         ("185:COTY", "Coty", "U.S. beauty and fragrance products", "Consumer Staples", "Personal Products"),
         ("185:WMT", "Walmart", "U.S. grocery and household retail", "Consumer Staples", "Discount Retail"),
@@ -1677,27 +2080,26 @@ def test_american_consumer_unavailable_article_returns_cotg_first_and_basket():
     }
     try:
         result = ThemeWorkflow(llm, quotes, {
-            "stock_universe": len(stocks),
-            "stock_candidate_budget": len(stocks),
-            "stock_broad_lane": len(stocks),
-            "etf_universe": 20,
-            "etf_target": 5,
-        }).run({
-            "theme": "American Consumer",
-            "date": "2026-07-09",
-            "url": "https://example.com/unavailable-consumer-article",
-        })
+                "stock_universe": len(stocks),
+                "stock_candidate_budget": len(stocks),
+                "stock_broad_lane": len(stocks),
+                "stock_target": min(8, len(stocks)),
+                "etf_universe": 20,
+                "etf_target": 3,
+            }).run({
+                "theme": "American Consumer",
+                "date": "2026-07-09",
+                "url": "https://example.com/unavailable-consumer-article",
+            })
     finally:
         workflow_module.fetch_article = original_fetch_article
 
-    etf_codes = [item["market_code"] for item in result["ThemeEtfs"]]
-    assert etf_codes[0] == "185:COTG"
-    assert set(etf_codes[1:]) & {"185:VDC", "185:XLP", "185:XRT"}
-    assert ConsumerQuotes.STAPLES_POOL in quotes.prompt_calls
-    assert ConsumerQuotes.DISCRETIONARY_POOL in quotes.prompt_calls
-    assert all(set(item) == {
-        "market_code", "theme_rationale", "Theme exposure", "event_date",
-    } for item in result["ThemeEtfs"])
+    assert len(result["ThemeStocks"]) == 7
+    assert len(result["ThemeEtfs"]) == 3
+    assert len({item["market_code"] for item in result["ThemeStocks"]}) == 7
+    assert len({item["market_code"] for item in result["ThemeEtfs"]}) == 3
+    assert quotes.prompt_calls
+    assert quotes.stock_relation_calls
 
 
 def test_end_to_end_arbitrary_non_catalog_micro_segment_is_stock_led():
@@ -1705,7 +2107,11 @@ def test_end_to_end_arbitrary_non_catalog_micro_segment_is_stock_led():
         ("185:COHR", "Coherent", "Hollow-core fiber photonics components", "Technology", "Photonics Components"),
         ("185:IPGP", "IPG Photonics", "Specialized fiber laser source", "Technology", "Laser Systems"),
         ("185:LITE", "Lumentum", "Precision optical coupling modules", "Technology", "Optical Components"),
-        ("185:LASR", "nLIGHT", "Industrial fiber laser modules", "Technology", "Laser Systems"),
+        (
+            "185:LASR", "nLIGHT",
+            "High-power laser modules for industrial materials processing",
+            "Technology", "Laser Systems",
+        ),
     ])
     _run_stock_led_theme_fixture(
         theme="subsea hollow-core fiber laser couplers",
@@ -1740,9 +2146,26 @@ def test_bearish_end_to_end_keeps_direction_and_derivative_facts_internal():
         "url": "https://example.com/x",
         "source_tag": "preserved",
     }
-    result = ThemeWorkflow(
-        BearishLLM(), FakeQuotes(), {"stock_universe": 20, "etf_universe": 100}
-    ).run(payload)
+    original_fetch_article = workflow_module.fetch_article
+    workflow_module.fetch_article = lambda url: {
+        "ok": True,
+        "title": "AI bubble pressure",
+        "text": (
+            "AI bubble concerns point to lower accelerator spending. "
+            "NVIDIA supplies AI accelerator processors."
+        ),
+        "url": url,
+    }
+    try:
+        result = ThemeWorkflow(
+            BearishLLM(), FakeQuotes(), {
+                "stock_universe": 20,
+                "stock_target": 1,
+                "etf_universe": 100,
+            }
+        ).run(payload)
+    finally:
+        workflow_module.fetch_article = original_fetch_article
     public = _build_output(payload, result)
     serialized = _serialize_output(public)
 
@@ -1780,7 +2203,8 @@ def test_stock_source_uses_full_ranked_block_and_explicit_sorting():
     class RecordingQuotes(FakeQuotes):
         def __init__(self):
             self.calls = []
-        def iter_ranked(self, selector, indicators, *, sort_pos=0, order="desc", page_size=1000):
+        def iter_ranked(self, selector, indicators, *, sort_pos=0, order="desc",
+                        page_size=1000, strict=False):
             self.calls.append((selector, indicators, sort_pos, order))
             yield {"code": "185:X", "rank": 1,
                    "values": {indicators[0]["req_unique_id"]: 1}}
@@ -2142,7 +2566,8 @@ def test_workflow_scores_the_whole_bounded_stock_candidate_set():
             return super().chat_json(system, user)
 
     wf = ThemeWorkflow(TrackingLLM(), FakeQuotes(),
-                       {"stock_universe": 50, "etf_universe": 50, "relevance_batch": 20})
+                       {"stock_universe": 50, "stock_target": 1,
+                        "etf_universe": 50, "relevance_batch": 20})
     wf.run({"theme": "AI memory", "date": "2026-07-09", "url": "https://example.com/x"})
     assert seen["n"] == 50
 
@@ -3723,18 +4148,34 @@ def test_inflation_cooling_rejects_generic_tech_factor_beta():
 
     class InflationLLM:
         def chat_json(self, system, user, **kw):
-            codes = [line.split("|")[0].strip() for line in user.splitlines()
-                     if "|" in line and ":" in line.split("|")[0]]
-            return [{"market_code": code, **verdicts[code]} for code in codes]
+            output = []
+            for line in user.splitlines():
+                if "|" not in line or ":" not in line.split("|")[0]:
+                    continue
+                code = line.split("|")[0].strip()
+                verdict = verdicts[code]
+                row = _fake_stock_score(line, verdict["ai_relevance"])
+                row.update({key: value for key, value in verdict.items()
+                            if key != "ai_relevance"})
+                row["theme_relevance"] = verdict["ai_relevance"]
+                output.append(row)
+            return output
 
     rows = _rows("185:MSFT", "185:HOME", "185:REIT")
-    chosen = ThemeWorkflow(InflationLLM(), FakeQuotes()).screen_until_target(
+    workflow = ThemeWorkflow(InflationLLM(), FakeQuotes())
+    chosen = workflow.screen_until_target(
         rows, {"theme_direction": "bullish"}, {}, target=3, kind="stocks")
 
     assert [candidate["code"] for candidate in chosen] == [
         "185:HOME", "185:REIT", "185:MSFT",
     ]
-    assert chosen[-1]["weak_theme_fallback"] is True
+    assert [candidate["code"] for candidate in workflow._last_stock_evidence] == [
+        "185:HOME", "185:REIT",
+    ]
+    assert all(
+        "weak_theme_fallback" not in candidate
+        for candidate in workflow._last_stock_evidence
+    )
 
 
 def test_stock_membership_is_invariant_to_market_cap_order():
@@ -3755,9 +4196,15 @@ def test_share_classes_consume_one_stock_output_slot():
     rows[0]["name"] = "Alphabet A"
     rows[1]["name"] = "Alphabet C"
     rows[2]["name"] = "Homebuilder Inc"
-    chosen = ThemeWorkflow(ScriptedLLM(scores), FakeQuotes()).screen_until_target(
+    workflow = ThemeWorkflow(ScriptedLLM(scores), FakeQuotes())
+    chosen = workflow.screen_until_target(
         rows, {}, {}, target=2, kind="stocks")
-    assert [candidate["code"] for candidate in chosen] == ["185:GOOGL", "185:HOME"]
+    assert [candidate["code"] for candidate in chosen] == [
+        "185:GOOGL", "185:HOME",
+    ]
+    assert [candidate["code"] for candidate in workflow._last_stock_evidence] == [
+        "185:GOOGL", "185:HOME",
+    ]
 
 
 def test_secondary_tech_terms_do_not_route_technology_etfs():
@@ -3834,17 +4281,20 @@ def test_sparse_percent_etf_portfolio_cannot_be_scaled_into_complete_coverage():
 def test_missing_structured_evidence_and_nonfinite_scores_fail_closed():
     class InvalidLLM:
         def chat_json(self, system, user, **kw):
-            codes = [line.split("|")[0].strip() for line in user.splitlines()
+            lines = [line for line in user.splitlines()
                      if "|" in line and ":" in line.split("|")[0]]
-            return [
-                {"market_code": codes[0], "ai_relevance": 5,
-                 "exposure_type": "direct", "confidence": 1, "reason": "operating link"},
-                {"market_code": codes[1], "ai_relevance": float("nan"),
-                 "exposure_type": "direct", "confidence": float("inf"),
-                 "impact_channel": "revenue_demand",
-                 "theme_specificity": "company_specific", "materiality": "high",
-                 "evidence_strength": "explicit", "reason": "operating link"},
-            ]
+            first_parts = [part.strip() for part in lines[0].split("|")]
+            nonfinite = _fake_stock_score(lines[1], 5)
+            nonfinite["theme_relevance"] = float("nan")
+            nonfinite["confidence"] = float("inf")
+            return [{
+                "candidate_id": first_parts[1],
+                "market_code": first_parts[0],
+                "theme_relevance": 5,
+                "exposure_type": "direct",
+                "confidence": 1,
+                "reason": "operating link",
+            }, nonfinite]
 
     rows = _rows("185:MISSING", "185:NONFINITE")
     wf = ThemeWorkflow(InvalidLLM(), FakeQuotes())
@@ -3853,30 +4303,34 @@ def test_missing_structured_evidence_and_nonfinite_scores_fail_closed():
     assert scores["185:NONFINITE"]["ai_relevance"] == 1.0
     assert scores["185:NONFINITE"]["confidence"] == 0.3
     chosen = wf.screen_until_target(rows, {}, {}, 2, "stocks")
-    assert len(chosen) == 2
-    assert all(candidate.get("weak_theme_fallback") for candidate in chosen)
+    assert [candidate["code"] for candidate in chosen] == [
+        "185:MISSING", "185:NONFINITE",
+    ]
     assert wf._last_stock_evidence == []
 
 
 def test_valuation_and_market_beta_channels_are_never_stock_eligible():
     class FactorLLM:
         def chat_json(self, system, user, **kw):
-            codes = [line.split("|")[0].strip() for line in user.splitlines()
+            rows = []
+            lines = [line for line in user.splitlines()
                      if "|" in line and ":" in line.split("|")[0]]
-            return [{
-                "market_code": code, "ai_relevance": 5,
-                "exposure_type": "direct", "confidence": 1,
-                "impact_channel": "valuation_only" if index == 0 else "market_beta",
-                "theme_specificity": "company_specific", "materiality": "high",
-                "evidence_strength": "explicit",
-                "reason": "Lower discount rates lift technology multiples",
-            } for index, code in enumerate(codes)]
+            for index, line in enumerate(lines):
+                row = _fake_stock_score(line, 5)
+                row.update({
+                    "impact_channel": (
+                        "valuation_only" if index == 0 else "market_beta"),
+                    "reason": "Lower discount rates lift technology multiples",
+                })
+                rows.append(row)
+            return rows
 
     workflow = ThemeWorkflow(FactorLLM(), FakeQuotes())
     chosen = workflow.screen_until_target(
         _rows("185:MSFT", "185:GOOG"), {}, {}, 2, "stocks")
-    assert len(chosen) == 2
-    assert all(candidate.get("weak_theme_fallback") for candidate in chosen)
+    assert [candidate["code"] for candidate in chosen] == [
+        "185:MSFT", "185:GOOG",
+    ]
     assert workflow._last_stock_evidence == []
 
 
@@ -3896,7 +4350,7 @@ def test_relevance_identity_must_match_and_never_recovers_by_position():
     assert all(score["relevance_status"] == "missing" for score in scores.values())
 
 
-def test_relevance_recovers_unique_ticker_only_identity_and_rejects_ambiguity():
+def test_relevance_rejects_ticker_only_identity_even_when_unique():
     class TickerOnlyLLM:
         def chat_json(self, system, user, **kw):
             rows = []
@@ -3919,7 +4373,7 @@ def test_relevance_recovers_unique_ticker_only_identity_and_rejects_ambiguity():
     recovered = ThemeWorkflow(
         TickerOnlyLLM(), FakeQuotes(), {"relevance_batch": 10}
     ).score_relevance({}, _rows("185:CRWV", "185:NBIS"))
-    assert all(score["relevance_status"] == "scored" for score in recovered.values())
+    assert all(score["relevance_status"] != "scored" for score in recovered.values())
 
     for batch_size in (1, 10):
         ambiguous = ThemeWorkflow(
@@ -3931,7 +4385,7 @@ def test_relevance_recovers_unique_ticker_only_identity_and_rejects_ambiguity():
         )
 
 
-def test_public_stock_order_preserves_full_causal_semantic_score():
+def test_public_stock_exposure_is_rank_relative_without_reordering():
     lower_quality = {
         "code": "185:A", "ai_relevance": 5, "exposure_type": "direct",
         "confidence": 1, "theme_specificity": "industry_specific",
@@ -3948,14 +4402,14 @@ def test_public_stock_order_preserves_full_causal_semantic_score():
     }
     rows = [lower_quality, higher_quality]
     ThemeWorkflow(FakeLLM(), FakeQuotes())._assign_theme_exposure(rows)
-    assert [row["code"] for row in rows] == ["185:B", "185:A"]
-    assert rows[0]["theme_exposure"] > rows[1]["theme_exposure"]
+    assert [row["code"] for row in rows] == ["185:A", "185:B"]
+    assert [row["theme_exposure"] for row in rows] == [5.0, 3.0]
 
 
 def test_stock_candidate_lanes_reach_theme_industries_below_broad_mega_caps():
     class LaneQuotes(FakeQuotes):
         def iter_ranked(self, selector, indicators, *, sort_pos=0, order="desc",
-                        page_size=1000):
+                        page_size=1000, strict=False):
             for index in range(200):
                 industry = "Regional Banks" if index >= 150 else "Technology Hardware"
                 yield {
@@ -3980,7 +4434,7 @@ def test_stock_candidate_lanes_reach_theme_industries_below_broad_mega_caps():
 def test_stock_candidate_lane_recognizes_chinese_homebuilder_description():
     class BilingualQuotes(FakeQuotes):
         def iter_ranked(self, selector, indicators, *, sort_pos=0, order="desc",
-                        page_size=1000):
+                        page_size=1000, strict=False):
             for index in range(100):
                 homebuilder = index == 99
                 yield {
@@ -4017,7 +4471,7 @@ def test_stock_candidate_lane_recognizes_exact_nonhousing_chinese_concept():
 def test_direct_stock_lane_keeps_multiple_pure_plays_from_one_industry():
     class DenseLaneQuotes(FakeQuotes):
         def iter_ranked(self, selector, indicators, *, sort_pos=0, order="desc",
-                        page_size=1000):
+                        page_size=1000, strict=False):
             for index in range(200):
                 homebuilder = 150 <= index < 160
                 yield {
@@ -4053,7 +4507,7 @@ def test_equal_thematic_matches_are_sampled_independently_of_market_cap_order():
     class EqualThemeQuotes(FakeQuotes):
         def __init__(self, reverse=False): self.reverse = reverse
         def iter_ranked(self, selector, indicators, *, sort_pos=0, order="desc",
-                        page_size=1000):
+                        page_size=1000, strict=False):
             broad = list(range(40))
             thematic = list(range(20))
             if self.reverse:
@@ -4088,7 +4542,7 @@ def test_equal_thematic_matches_are_sampled_independently_of_market_cap_order():
 def test_unvalidated_etf_terms_do_not_consume_reserved_stock_pathway_slots():
     class MixedTermsQuotes(FakeQuotes):
         def iter_ranked(self, selector, indicators, *, sort_pos=0, order="desc",
-                        page_size=1000):
+                        page_size=1000, strict=False):
             labels = ["homebuilding"] * 10 + [
                 "artificial intelligence", "semiconductors", "cybersecurity",
                 "robotics", "fintech", "ecommerce", "regional banks",
@@ -4125,7 +4579,7 @@ def test_unvalidated_etf_terms_do_not_consume_reserved_stock_pathway_slots():
 def test_stock_candidate_scoring_context_interleaves_broad_and_theme_lanes():
     class LaneQuotes(FakeQuotes):
         def iter_ranked(self, selector, indicators, *, sort_pos=0, order="desc",
-                        page_size=1000):
+                        page_size=1000, strict=False):
             for index in range(12):
                 thematic = index >= 6
                 yield {
@@ -4624,9 +5078,14 @@ def test_preferred_share_classes_consume_one_issuer_slot_and_best_class_wins():
     rows[0]["name"] = "Apollo Global Preferred Stock A"
     rows[1]["name"] = "Apollo Global"
     rows[2]["name"] = "Homebuilder"
-    chosen = ThemeWorkflow(ScriptedLLM(scores), FakeQuotes()).screen_until_target(
-        rows, {}, {}, 2, "stocks")
-    assert [candidate["code"] for candidate in chosen] == ["185:APO", "185:HOME"]
+    workflow = ThemeWorkflow(ScriptedLLM(scores), FakeQuotes())
+    chosen = workflow.screen_until_target(rows, {}, {}, 2, "stocks")
+    assert [candidate["code"] for candidate in chosen] == [
+        "185:APO", "185:HOME",
+    ]
+    assert [candidate["code"] for candidate in workflow._last_stock_evidence] == [
+        "185:APO", "185:HOME",
+    ]
 
 
 def test_etf_breadth_deduplicates_issuer_share_classes():
@@ -4655,7 +5114,10 @@ def test_run_keeps_exact_wrapper_when_all_basket_holdings_are_unavailable():
         "stock_universe": 20, "etf_universe": 100,
     }).run({"theme": "AI memory", "date": "2026-07-09",
            "url": "https://example.com/x"})
-    assert [item["market_code"] for item in result["ThemeEtfs"]] == ["185:NVDL"]
+    codes = [item["market_code"] for item in result["ThemeEtfs"]]
+    assert len(codes) == 5
+    assert len(set(codes)) == 5
+    assert codes[0] == "185:NVDL"
 
 
 def _neocloud_profile():
@@ -4704,7 +5166,7 @@ class _NeocloudQuotes:
         self.profile_requests = []
 
     def iter_ranked(self, selector, indicators, *, sort_pos=0, order="desc",
-                    page_size=1000):
+                    page_size=1000, strict=False):
         for index in range(self.count):
             code = f"185:S{index}"
             name = f"Generic Company {index}"
@@ -4794,8 +5256,12 @@ def test_neocloud_resolved_entities_bypass_broad_lane_and_stale_metadata():
     assert by_code["185:CRWV"]["candidate_provenance"] == [
         "theme_profile", "title_lede",
     ]
-    assert by_code["185:NVDA"]["candidate_provenance"] == ["broad_liquidity"]
-    assert by_code["185:MU"]["candidate_provenance"] == ["broad_liquidity"]
+    assert by_code["185:NVDA"]["candidate_provenance"] == [
+        "article_body", "broad_liquidity",
+    ]
+    assert by_code["185:MU"]["candidate_provenance"] == [
+        "article_body", "broad_liquidity",
+    ]
     assert "185:QQQ" not in by_code
     assert len({candidate["candidate_id"] for candidate in candidates}) == 50
 
@@ -4855,7 +5321,7 @@ def test_alternate_share_class_merges_article_guarantee_into_retained_issuer():
             scene = "alphabet-fixture"
 
         def iter_ranked(self, selector, indicators, *, sort_pos=0, order="desc",
-                        page_size=1000):
+                        page_size=1000, strict=False):
             for index, (code, name) in enumerate((
                 ("185:GOOGL", "Alphabet Inc Class A"),
                 ("185:GOOG", "Alphabet Inc Class C"),
@@ -4898,7 +5364,7 @@ def test_alternate_share_class_merges_article_guarantee_into_retained_issuer():
         marketcode_resolver=resolver,
     ).stock_candidates(
         brief, profile,
-        {"title": "Alphabet (GOOG) expands its platform", "text": ""},
+        {"title": "Alphabet (NASDAQ: GOOG) expands its platform", "text": ""},
     )
 
     assert len(candidates) == 1
@@ -4917,6 +5383,55 @@ def test_title_lede_literal_validation_uses_name_boundaries_and_legal_suffixes()
     assert not is_mentioned({"name": "Apple"}, "Pineapple prices increased")
     assert is_mentioned(
         {"name": "CoreWeave, Inc."}, "CoreWeave reported stronger demand")
+    assert not is_mentioned(
+        {"name": "Strategy", "ticker": "MSTR"},
+        "Apple strategy lifts its software roadmap",
+    )
+    assert not is_mentioned(
+        {"name": "Strategy", "ticker": "MSTR"},
+        "Strategy lifts Apple software roadmap",
+    )
+    assert is_mentioned(
+        {"name": "Strategy", "ticker": "MSTR"},
+        "Strategy Inc. updates its software roadmap",
+    )
+    assert is_mentioned(
+        {"name": "Strategy", "ticker": "MSTR"},
+        "$MSTR updates its software roadmap",
+    )
+    assert not is_mentioned(
+        {"name": "ServiceNow", "ticker": "NOW"},
+        "Apple says its software roadmap matters NOW",
+    )
+    assert is_mentioned(
+        {"name": "ServiceNow", "ticker": "NOW"},
+        "ServiceNow expanded its software roadmap",
+    )
+    assert is_mentioned(
+        {"name": "ServiceNow", "ticker": "NOW"},
+        "Shares of $NOW moved after the update",
+    )
+    assert not is_mentioned(
+        {"name": "Toast", "ticker": "TOST"},
+        "Toast the success of AI cloud launches.",
+    )
+    assert is_mentioned(
+        {"name": "Toast", "ticker": "TOST"},
+        "Toast reported stronger restaurant demand.",
+    )
+
+
+def test_structured_relationship_binds_resolved_coordinated_entity_stems_only():
+    is_structured_reference = (
+        workflow_module._structured_entity_reference_is_mentioned
+    )
+    relationship = "CoreWeave and Nebius expansion increases GPU demand"
+    assert is_structured_reference({"name": "CoreWeave"}, relationship)
+    assert is_structured_reference({"name": "Nebius Group"}, relationship)
+    assert not is_structured_reference(
+        {"name": "Toast", "ticker": "TOST"},
+        "Toast the success of AI cloud launches.",
+    )
 
 
 def test_outside_universe_theme_entity_requires_one_live_confirmation_batch():
@@ -4939,6 +5454,14 @@ def test_outside_universe_theme_entity_requires_one_live_confirmation_batch():
 
 def _new_stock_score(candidate_id, code, *, theme, article, exposure="direct"):
     direct = exposure == "direct"
+    business_fact = (
+        "Operates GPU cloud capacity" if direct
+        else "Supplies AI infrastructure components"
+    )
+    theme_connection = (
+        "Neocloud demand increases utilization of GPU cloud capacity" if direct
+        else "Neocloud expansion increases demand for AI infrastructure components"
+    )
     return {
         "candidate_id": candidate_id,
         "market_code": code,
@@ -4952,6 +5475,14 @@ def _new_stock_score(candidate_id, code, *, theme, article, exposure="direct"):
         "evidence_strength": "explicit" if direct else "derived",
         "reason": "GPU cloud capacity is core revenue" if direct else "Supplies AI infrastructure",
         "article_reason": "Explicit operating evidence" if article else "not mentioned",
+        "public_relation_score": theme,
+        "public_relation_confidence": 0.95,
+        "relation_type": "direct" if direct else "supplier",
+        "directional_effect": "positive",
+        "business_fact": business_fact,
+        "theme_connection": theme_connection,
+        "financial_pathway": "Higher demand can lift orders, revenue, and earnings",
+        "evidence_basis": "combined" if article else "company_profile",
     }
 
 
@@ -5016,11 +5547,27 @@ def test_golden_neocloud_public_stocks_put_coreweave_and_nebius_first():
                 else:
                     row = _new_stock_score(
                         candidate_id, code, theme=score, article=1, exposure=exposure)
+                    if exposure == "supply_chain":
+                        row["theme_connection"] = (
+                            "CoreWeave and Nebius expansion increases demand for "
+                            "AI infrastructure components"
+                        )
                 output.append(row)
             return output
 
     quotes = _NeocloudQuotes()
     article, brief = _neocloud_article_and_brief()
+    article = dict(article, text=(
+        "CoreWeave operates GPU cloud capacity, and Neocloud demand increases "
+        "utilization of CoreWeave GPU cloud capacity. "
+        "Nebius Group operates GPU cloud capacity, and Neocloud demand increases "
+        "utilization of Nebius Group GPU cloud capacity. "
+        "NVIDIA supplies AI infrastructure components as CoreWeave and Nebius "
+        "expansion increases demand for AI infrastructure components. "
+        "Micron Technology supplies AI infrastructure components as CoreWeave "
+        "and Nebius expansion increases demand for AI infrastructure components."
+    ))
+    brief = dict(brief, input_theme="Neocloud")
     workflow = ThemeWorkflow(
         NeocloudScoringLLM(), quotes,
         {"stock_universe": 300, "stock_candidate_budget": 50,
@@ -5032,13 +5579,11 @@ def test_golden_neocloud_public_stocks_put_coreweave_and_nebius_first():
     workflow._exact_theme = "Neocloud"
     candidates = workflow.stock_candidates(brief, profile, article)
     chosen = workflow.screen_until_target(candidates, brief, article, 8, "stocks")
-    public = workflow._assemble(chosen, {}, "2026-08-14")
 
-    assert [item["market_code"] for item in public[:2]] == ["185:CRWV", "185:NBIS"]
-    assert [item["market_code"] for item in public[2:4]] == ["185:NVDA", "185:MU"]
-    assert all(set(item) == {
-        "market_code", "theme_rationale", "Theme exposure", "event_date",
-    } for item in public)
+    assert [item["code"] for item in chosen[:2]] == ["185:CRWV", "185:NBIS"]
+    assert [item["code"] for item in chosen[2:4]] == ["185:NVDA", "185:MU"]
+    assert len(chosen) == 8
+    assert all(item["stock_membership_frozen"] for item in chosen)
 
 
 def test_eighty_twenty_weight_cannot_admit_off_theme_article_name():
@@ -5055,9 +5600,22 @@ def test_eighty_twenty_weight_cannot_admit_off_theme_article_name():
                 parts = [part.strip() for part in line.split("|")]
                 if len(parts) >= 3 and ":" in parts[0]:
                     theme, article, exposure = scores[parts[0]]
-                    output.append(_new_stock_score(
+                    row = _new_stock_score(
                         parts[1], parts[0], theme=theme,
-                        article=article, exposure=exposure))
+                        article=article, exposure=exposure)
+                    business = next(
+                        (part.partition("=")[2] for part in parts
+                         if part.startswith("business=")),
+                        "",
+                    )
+                    row.update({
+                        "business_fact": business,
+                        "theme_connection": (
+                            f"Neocloud demand increases orders for {business}"
+                        ),
+                        "evidence_basis": "company_profile",
+                    })
+                    output.append(row)
             return output
 
     workflow = ThemeWorkflow(WeightLLM(), FakeQuotes())
@@ -5066,12 +5624,15 @@ def test_eighty_twenty_weight_cannot_admit_off_theme_article_name():
     assert [candidate["code"] for candidate in chosen] == [
         "185:PURE", "185:SUP", "185:OFF",
     ]
-    assert chosen[0]["article_support"] == 0.0
-    assert chosen[-1]["weak_theme_fallback"] is True
-    assert workflow._last_stock_evidence == chosen[:2]
+    structural = workflow._last_stock_evidence
+    assert [candidate["code"] for candidate in structural] == [
+        "185:PURE", "185:SUP",
+    ]
+    assert structural[0]["article_support"] == 0.0
+    assert all("weak_theme_fallback" not in candidate for candidate in structural)
 
 
-def test_public_stock_fallback_fills_eight_without_expanding_etf_evidence():
+def test_public_stock_fallback_fills_exact_basket_but_keeps_strict_etf_evidence():
     class BitcoinLLM(ScriptedLLM):
         def chat_json(self, system, user, **kw):
             if "Score each candidate" not in user:
@@ -5089,19 +5650,18 @@ def test_public_stock_fallback_fills_eight_without_expanding_etf_evidence():
                     score, exposure = 3.1, "direct"
                 else:
                     score, exposure = 1.5, "factor_proxy"
-                output.append({
-                    "market_code": code,
-                    "theme_relevance": score,
-                    "article_support": 0.0,
-                    "exposure_type": exposure,
-                    "confidence": 0.9 if exposure == "direct" else 0.2,
-                    "impact_channel": "revenue_demand" if exposure == "direct" else "market_beta",
-                    "theme_specificity": "company_specific" if exposure == "direct" else "broad_factor",
-                    "materiality": "medium" if exposure == "direct" else "low",
-                    "evidence_strength": "explicit" if exposure == "direct" else "none",
-                    "reason": "Bitcoin mining economics" if exposure == "direct" else "broad market beta",
-                    "article_reason": "not mentioned",
-                })
+                row = _fake_stock_score(line, score)
+                if exposure == "factor_proxy":
+                    row.update({
+                        "exposure_type": "factor_proxy",
+                        "confidence": 0.2,
+                        "impact_channel": "market_beta",
+                        "theme_specificity": "broad_factor",
+                        "materiality": "low",
+                        "evidence_strength": "none",
+                        "reason": "broad market beta",
+                    })
+                output.append(row)
             return {"results": output}
 
     rows = _rows(*[
@@ -5116,19 +5676,26 @@ def test_public_stock_fallback_fills_eight_without_expanding_etf_evidence():
         rows, {"exact_theme": "Bitcoin Surged"}, {}, target=8, kind="stocks")
 
     assert len(chosen) == 8
-    assert [candidate["code"] for candidate in chosen[:2]] == [
-        "185:MARA", "185:RIOT",
-    ]
-    assert all(candidate.get("weak_theme_fallback") for candidate in chosen[2:])
+    assert len({candidate["code"] for candidate in chosen}) == 8
+    assert chosen[0]["code"] == "185:MARA"
+    assert all("weak_theme_fallback" not in candidate for candidate in chosen)
     assert {candidate["code"] for candidate in workflow._last_stock_evidence} == {
         "185:MARA",
     }
     assert all(candidate["code"] not in {
         "185:CLSK", "185:COIN", "185:MSTR", "185:WULF", "185:IREN", "185:BTDR", "185:NVDA", "185:AMD",
     } for candidate in workflow._last_stock_evidence)
+    accepted, narratives = workflow.finalize_stock_rationales(
+        {"theme": "Bitcoin Surged"}, {"theme_direction": "bullish"},
+        chosen, 8,
+    )
+    assert [candidate["code"] for candidate in accepted] == [
+        candidate["code"] for candidate in chosen
+    ]
+    assert set(narratives) == {candidate["code"] for candidate in chosen}
 
 
-def test_title_lede_guarantee_includes_weak_anchors_at_bottom_and_caps_overflow():
+def test_title_lede_anchors_are_not_guaranteed_into_public_output():
     class GuaranteeLLM:
         def chat_json(self, system, user, **kw):
             output = []
@@ -5139,10 +5706,22 @@ def test_title_lede_guarantee_includes_weak_anchors_at_bottom_and_caps_overflow(
                 index = int(re.search(r"(\d+)$", parts[0]).group(1))
                 anchor = parts[0].startswith("185:A")
                 theme = max(1.0, 5.0 - 0.3 * index) if anchor else 4.5
-                output.append(_new_stock_score(
+                row = _new_stock_score(
                     parts[1], parts[0], theme=theme,
-                    article=1.0 if anchor else 0.0,
-                ))
+                    article=1.0 if anchor else 0.0)
+                business = next(
+                    (part.partition("=")[2] for part in parts
+                     if part.startswith("business=")),
+                    "",
+                )
+                row.update({
+                    "business_fact": business,
+                    "theme_connection": (
+                        f"Neocloud demand increases orders for {business}"
+                    ),
+                    "evidence_basis": "company_profile",
+                })
+                output.append(row)
             return output
 
     few = _rows("185:A12", "185:A13", "185:A14", "185:N0", "185:N1", "185:N2")
@@ -5150,12 +5729,12 @@ def test_title_lede_guarantee_includes_weak_anchors_at_bottom_and_caps_overflow(
         candidate["guaranteed_article_anchor"] = True
     workflow = ThemeWorkflow(GuaranteeLLM(), FakeQuotes())
     chosen = workflow.screen_until_target(
-        few, {"exact_theme": "Neocloud"}, {}, 8, "stocks")
-    assert {candidate["code"] for candidate in chosen} == {candidate["code"] for candidate in few}
-    assert [candidate["code"] for candidate in chosen[-3:]] == [
-        "185:A12", "185:A13", "185:A14",
-    ]
-    assert all(candidate["weak_guaranteed_anchor"] for candidate in chosen[-3:])
+        few, {"exact_theme": "Neocloud"}, {}, 6, "stocks")
+    assert len(chosen) == 6
+    assert all(
+        "weak_guaranteed_anchor" not in candidate
+        for candidate in workflow._last_stock_evidence
+    )
     assert {candidate["code"] for candidate in workflow._last_stock_evidence} == {
         "185:N0", "185:N1", "185:N2",
     }
@@ -5163,11 +5742,14 @@ def test_title_lede_guarantee_includes_weak_anchors_at_bottom_and_caps_overflow(
     overflow = _rows(*[f"185:A{i}" for i in range(10)])
     for candidate in overflow:
         candidate["guaranteed_article_anchor"] = True
-    capped = ThemeWorkflow(GuaranteeLLM(), FakeQuotes()).screen_until_target(
+    overflow_workflow = ThemeWorkflow(GuaranteeLLM(), FakeQuotes())
+    capped = overflow_workflow.screen_until_target(
         overflow, {"exact_theme": "Neocloud"}, {}, 8, "stocks")
-    assert [candidate["code"] for candidate in capped] == [
-        f"185:A{i}" for i in range(8)
-    ]
+    assert len(capped) == 8
+    assert all(
+        "weak_guaranteed_anchor" not in candidate
+        for candidate in overflow_workflow._last_stock_evidence
+    )
 
 
 def test_partial_relevance_response_retries_only_missing_candidates():
@@ -5218,17 +5800,18 @@ def test_duplicate_candidate_ids_fail_closed_after_single_retry():
     assert all(score["relevance_retry"] == "persistent_miss" for score in scores.values())
 
 
-def test_market_uplift_changes_display_only_not_semantic_stock_order():
+def test_market_strength_cannot_inflate_public_stock_theme_exposure():
     rows = [
-        {"code": "185:STRONG", "selection_score": 0.80,
-         "semantic_score": 0.80, "market_strength": 0.0},
-        {"code": "185:MOVER", "selection_score": 0.75,
-         "semantic_score": 0.75, "market_strength": 1.0},
+        {"code": "185:STRONG", "public_semantic_score": 0.80,
+         "market_strength": 0.0},
+        {"code": "185:MOVER", "public_semantic_score": 0.75,
+         "market_strength": 1.0},
     ]
     ThemeWorkflow(FakeLLM(), FakeQuotes())._assign_theme_exposure(rows)
     assert [row["code"] for row in rows] == ["185:STRONG", "185:MOVER"]
-    assert rows[1]["theme_exposure_raw"] > rows[0]["theme_exposure_raw"]
-    assert rows[0]["theme_exposure"] >= rows[1]["theme_exposure"]
+    assert rows[0]["theme_exposure_raw"] == 0.80
+    assert rows[1]["theme_exposure_raw"] == 0.75
+    assert rows[0]["theme_exposure"] > rows[1]["theme_exposure"]
 
 
 def test_theme_profile_is_frozen_before_article_analysis():
@@ -5261,6 +5844,1661 @@ def test_theme_profile_is_frozen_before_article_analysis():
     assert profile["canonical_definition"].startswith("Specialized cloud operators")
     assert workflow._theme_profile == profile
     assert brief["theme_cn"] == profile["theme_cn"]
+    assert len(llm.calls) == 2
+
+
+def _grounded_public_relation_score(
+    candidate_id, code, *, business_fact, theme_connection,
+    financial_pathway, relation_type="supplier", theme_relevance=2.4,
+    public_relation_score=4.5, exposure_type="beneficiary",
+    article_support=0.5,
+):
+    """Complete score fixture for a broker-valid public relationship."""
+    return {
+        "candidate_id": candidate_id,
+        "market_code": code,
+        "theme_relevance": theme_relevance,
+        "article_support": article_support,
+        "exposure_type": exposure_type,
+        "confidence": 0.92,
+        "impact_channel": (
+            "supply_chain_orders"
+            if relation_type in {"supplier", "customer"}
+            else "revenue_demand"
+        ),
+        "theme_specificity": "company_specific",
+        "materiality": "high",
+        "evidence_strength": "explicit",
+        "reason": theme_connection,
+        "article_reason": "The article supplies company-specific operating evidence.",
+        "public_relation_score": public_relation_score,
+        "public_relation_confidence": 0.92,
+        "relation_type": relation_type,
+        "directional_effect": "positive",
+        "business_fact": business_fact,
+        "theme_connection": theme_connection,
+        "financial_pathway": financial_pathway,
+        "evidence_basis": "combined",
+    }
+
+
+def _unrelated_public_score(candidate_id, code):
+    return {
+        "candidate_id": candidate_id,
+        "market_code": code,
+        "theme_relevance": 1.0,
+        "article_support": 0.0,
+        "exposure_type": "factor_proxy",
+        "confidence": 0.2,
+        "impact_channel": "market_beta",
+        "theme_specificity": "broad_factor",
+        "materiality": "low",
+        "evidence_strength": "none",
+        "reason": "Generic market exposure does not establish an operating relationship.",
+        "article_reason": "not mentioned",
+        "public_relation_score": 1.0,
+        "public_relation_confidence": 0.2,
+        "relation_type": "none",
+        "directional_effect": "none",
+        "business_fact": "",
+        "theme_connection": "",
+        "financial_pathway": "",
+        "evidence_basis": "none",
+    }
+
+
+def test_eight_grounded_public_relationships_do_not_expand_etf_evidence():
+    names = {
+        "185:AAPL": "Apple",
+        "185:TSM": "TSMC",
+        "185:MU": "Micron",
+        "185:AMAT": "Applied Materials",
+        "185:GOOGL": "Alphabet",
+        "185:QCOM": "Qualcomm",
+        "185:AMKR": "Amkor",
+        "185:TER": "Teradyne",
+        "185:MSTR": "Strategy",
+    }
+    structural_codes = {"185:AAPL", "185:TSM", "185:MU", "185:AMAT"}
+    public_codes = set(names) - {"185:MSTR"}
+
+    class RelationshipLLM:
+        def chat_json(self, system, user, **kwargs):
+            assert kwargs.get("schema_name") == "stock_relevance_batch"
+            results = []
+            for line in user.splitlines():
+                parts = [part.strip() for part in line.split("|")]
+                if len(parts) < 3 or parts[0] not in names:
+                    continue
+                code, candidate_id = parts[:2]
+                if code == "185:MSTR":
+                    results.append(_unrelated_public_score(candidate_id, code))
+                    continue
+                structural = code in structural_codes
+                results.append(_grounded_public_relation_score(
+                    candidate_id,
+                    code,
+                    business_fact=f"{names[code]} sells event-linked products and services.",
+                    theme_connection=(
+                        f"{names[code]}'s operations have a supplied company-specific event link."
+                    ),
+                    financial_pathway="The event can lift product orders and revenue.",
+                    relation_type="direct" if code == "185:AAPL" else "supplier",
+                    theme_relevance=4.3 if structural else 2.4,
+                    public_relation_score=4.8 if structural else 4.2,
+                    exposure_type="direct" if code == "185:AAPL" else (
+                        "supply_chain" if structural else "beneficiary"
+                    ),
+                ))
+            return {"results": results}
+
+    workflow = ThemeWorkflow(
+        RelationshipLLM(), FakeQuotes(), {"relevance_batch": 20},
+    )
+    candidates = [
+        {
+            "code": code,
+            "name": name,
+            "rank": rank,
+            "candidate_provenance": ["article_body"],
+            "company_introduction": (
+                f"{name} sells event-linked products and services."
+                if code != "185:MSTR"
+                else "Strategy holds bitcoin and sells enterprise software."
+            ),
+        }
+        for rank, (code, name) in enumerate(names.items(), 1)
+    ]
+    public, etf_evidence = workflow.screen_stock_sets(
+        candidates,
+        {"theme_direction": "bullish"},
+        {
+            "title": "Apple leadership event",
+            "text": " ".join(
+                f"{name}'s operations have a supplied company-specific event link."
+                for code, name in names.items() if code != "185:MSTR"
+            ),
+        },
+        8,
+    )
+
+    assert len(public) == 8
+    assert {candidate["code"] for candidate in public} == public_codes
+    assert {candidate["code"] for candidate in etf_evidence} == structural_codes
+    assert public_codes - structural_codes
+    assert (public_codes - structural_codes).isdisjoint(
+        candidate["code"] for candidate in etf_evidence
+    )
+    assert "185:MSTR" not in {candidate["code"] for candidate in public}
+
+
+def test_stock_finalizer_rejects_membership_count_mismatch_as_universe_exhaustion():
+    workflow = ThemeWorkflow(FakeLLM(), FakeQuotes())
+    candidates = [
+        {"code": f"185:GROUNDED{i}", "name": f"Grounded Issuer {i}"}
+        for i in range(7)
+    ]
+
+    try:
+        workflow.finalize_stock_rationales(
+            {"theme": "Apple leadership"},
+            {"theme_direction": "bullish"},
+            candidates,
+            8,
+        )
+        assert False, "accepted fewer grounded candidates than stock_target"
+    except SelectionUniverseError as exc:
+        assert exc.asset_class == "stock"
+        assert exc.expected == 8
+        assert exc.available == 7
+
+
+def test_invalid_stock_rationale_uses_same_full_market_code_fallback():
+    class InvalidNarrator:
+        def chat_json(self, system, user, **kwargs):
+            return {"items": [{
+                "candidate_id": "S0001",
+                "market_code": "185:MU",
+                "theme_rationale": {
+                    "type": "multilingual", "en": "", "zh": "",
+                },
+            }]}
+
+    candidate = {
+        "candidate_id": "S0001", "code": "185:MU", "name": "Micron",
+        "company_introduction": "Micron sells HBM memory chips",
+        "business_fact": "Micron sells HBM memory chips",
+        "theme_connection": "AI accelerators require HBM memory chips",
+        "financial_pathway": "More HBM orders can lift revenue and earnings",
+        "directional_effect": "positive",
+    }
+    workflow = ThemeWorkflow(InvalidNarrator(), FakeQuotes())
+    accepted, narratives = workflow.finalize_stock_rationales(
+        {"theme": "AI memory"},
+        {"theme_direction": "bullish"},
+        [candidate],
+        1,
+    )
+    assert accepted == [candidate]
+    assert set(narratives) == {"185:MU"}
+    rationale = narratives["185:MU"]["theme_rationale"]
+    assert rationale["en"] and rationale["zh"]
+    assert "Micron sells HBM memory chips" in rationale["en"]
+
+
+def test_all_quota_filler_stock_boilerplate_is_rejected():
+    safe_en = (
+        "Apple designs consumer devices and services, and product execution can lift "
+        "device sales and services earnings."
+    )
+    safe_zh = "苹果设计消费电子设备并运营服务业务，产品执行有望推动设备销售与服务业务盈利。"
+    for bad_en in (
+        (
+            "Apple is a secondary watchlist name, not a high-conviction theme trade; "
+            "a clear earnings catalyst still needs to emerge."
+        ),
+        (
+            "Apple is the sole company directly governed by the event, while stronger "
+            "theme demand could affect revenue."
+        ),
+        (
+            "Micron has memory exposure, while available disclosures do not quantify "
+            "the sensitivity."
+        ),
+    ):
+        assert ThemeWorkflow._validated_theme_rationale({
+            "type": "multilingual", "en": bad_en, "zh": safe_zh,
+        }) is None
+    for bad_zh in (
+        "苹果是次级观察标的，并非高确信度主题交易，明确的盈利催化剂仍需出现。",
+        "苹果是唯一直接受影响的公司，更强的主题需求可能推动收入。",
+    ):
+        assert ThemeWorkflow._validated_theme_rationale({
+            "type": "multilingual", "en": safe_en, "zh": bad_zh,
+        }) is None
+
+
+def test_apple_ceo_ecosystem_produces_distinct_grounded_rationales_without_mstr():
+    cases = {
+        "185:AAPL": {
+            "name": "Apple",
+            "business": (
+                "Apple designs and sells devices including iPhones, Macs, wearables, "
+                "and digital services."
+            ),
+            "connection": "Leadership continuity supports Apple's product and AI roadmap.",
+            "pathway": "Sustained execution can lift device sales and services earnings.",
+            "relation": "direct",
+            "theme": 5.0,
+            "exposure": "direct",
+            "en": (
+                "Apple designs and sells iPhones, Macs, wearables, and digital services; leadership "
+                "continuity supports Apple's product and AI roadmap, so sustained execution can "
+                "lift device sales and services earnings."
+            ),
+            "zh": (
+                "Apple销售iPhone、Mac、可穿戴设备和数字服务；领导层延续性支撑Apple的产品"
+                "与人工智能路线图，持续执行可提升设备销售和服务业务盈利。"
+            ),
+        },
+        "185:TSM": {
+            "name": "TSMC",
+            "business": "TSMC fabricates advanced processors for Apple devices.",
+            "connection": "Apple's continuing silicon roadmap requires advanced-node foundry capacity.",
+            "pathway": "Apple devices can raise processor orders and foundry revenue.",
+            "relation": "supplier",
+            "theme": 3.8,
+            "exposure": "supply_chain",
+            "en": (
+                "TSMC fabricates advanced processors for Apple devices; Apple's continuing silicon "
+                "roadmap requires advanced-node foundry capacity, so Apple devices can raise "
+                "processor orders and foundry revenue."
+            ),
+            "zh": (
+                "TSMC制造处理器供Apple设备使用；Apple持续推进的硅路线图需要先进制程代工"
+                "产能，Apple设备可提升处理器订单和代工收入。"
+            ),
+        },
+        "185:GOOGL": {
+            "name": "Alphabet",
+            "business": "Alphabet operates Google Search, Cloud, and Gemini.",
+            "connection": "Alphabet has an Apple AI-distribution partnership in the supplied evidence.",
+            "pathway": "Broader Gemini distribution can increase usage and cloud revenue.",
+            "relation": "partner",
+            "theme": 2.6,
+            "exposure": "beneficiary",
+            "en": (
+                "Alphabet operates Google Search, Cloud, and Gemini; its Apple AI-distribution "
+                "partnership can broaden Gemini distribution, increasing usage and cloud revenue."
+            ),
+            "zh": (
+                "Alphabet运营云和Gemini；其与Apple的人工智能分发合作可扩大Gemini分发，"
+                "提高使用量并增加云业务收入。"
+            ),
+        },
+        "185:MU": {
+            "name": "Micron",
+            "business": "Micron sells DRAM and NAND memory used in consumer devices.",
+            "connection": "New Apple devices can carry higher memory content.",
+            "pathway": "Higher memory content can raise component demand, revenue, and margins.",
+            "relation": "supplier",
+            "theme": 3.7,
+            "exposure": "supply_chain",
+            "en": (
+                "Micron sells DRAM and NAND memory used in consumer devices; higher memory content "
+                "in new Apple devices can raise component demand, memory revenue, and margins."
+            ),
+            "zh": (
+                "Micron销售DRAM和NAND存储，用于消费设备；Apple新设备的存储容量提升可"
+                "增加元件需求、存储收入和利润率。"
+            ),
+        },
+        "185:AVGO": {
+            "name": "Broadcom",
+            "business": "Broadcom supplies wireless connectivity chips used in Apple devices.",
+            "connection": "Apple device programs require Broadcom connectivity components.",
+            "pathway": "A steady product cycle can raise component orders and chip revenue.",
+            "relation": "supplier",
+            "theme": 3.5,
+            "exposure": "supply_chain",
+            "en": (
+                "Broadcom supplies wireless connectivity chips used in Apple devices; Apple device "
+                "programs require those components, so a steady product cycle can raise component "
+                "orders and chip revenue."
+            ),
+            "zh": (
+                "Broadcom供应无线连接芯片，用于Apple设备；Apple设备项目需要这些元件，"
+                "稳定的产品周期可提升元件订单和芯片收入。"
+            ),
+        },
+        "185:QCOM": {
+            "name": "Qualcomm",
+            "business": "Qualcomm sells cellular modems and licenses wireless technology.",
+            "connection": "Apple premium devices use cellular connectivity technology.",
+            "pathway": "Apple device demand can support modem shipments, licensing revenue, and earnings.",
+            "relation": "supplier",
+            "theme": 3.0,
+            "exposure": "supply_chain",
+            "en": (
+                "Qualcomm sells cellular modems and licenses wireless technology; Apple premium "
+                "devices use cellular connectivity, so device demand can support modem shipments, "
+                "licensing revenue, and earnings."
+            ),
+            "zh": (
+                "Qualcomm销售蜂窝调制解调器并授权无线技术；Apple高端设备使用蜂窝连接，"
+                "设备需求可支撑调制解调器出货、授权收入和盈利。"
+            ),
+        },
+        "185:AMKR": {
+            "name": "Amkor",
+            "business": "Amkor provides outsourced semiconductor packaging and testing.",
+            "connection": "Apple supplier volumes flow through packaging and testing capacity.",
+            "pathway": "Higher supplier volumes can increase packaging orders, utilization, and revenue.",
+            "relation": "supplier",
+            "theme": 3.4,
+            "exposure": "supply_chain",
+            "en": (
+                "Amkor provides outsourced semiconductor packaging and testing; Apple supplier "
+                "volumes flow through that capacity, so higher volumes can increase packaging "
+                "orders, utilization, and revenue."
+            ),
+            "zh": (
+                "Amkor提供半导体封装与测试；Apple供应商产量流经这些产能，产量提升"
+                "可增加封装订单、利用率和收入。"
+            ),
+        },
+        "185:TER": {
+            "name": "Teradyne",
+            "business": "Teradyne sells automated semiconductor test systems.",
+            "connection": "New Apple chip programs require suppliers to expand test capacity.",
+            "pathway": "Expanded test capacity can boost test-system orders and revenue.",
+            "relation": "second_order",
+            "theme": 3.2,
+            "exposure": "enabler",
+            "en": (
+                "Teradyne sells automated semiconductor test systems; new Apple chip programs "
+                "require suppliers to expand test capacity, which can boost test-system orders "
+                "and revenue."
+            ),
+            "zh": (
+                "Teradyne销售半导体自动化测试系统；Apple新芯片项目要求供应商扩大测试产能，"
+                "从而提升测试系统订单和收入。"
+            ),
+        },
+    }
+
+    class AppleEcosystemLLM:
+        def chat_json(self, system, user, **kwargs):
+            if kwargs.get("schema_name") == "stock_relevance_batch":
+                results = []
+                for line in user.splitlines():
+                    parts = [part.strip() for part in line.split("|")]
+                    if len(parts) < 3 or not parts[0].startswith("185:"):
+                        continue
+                    code, candidate_id = parts[:2]
+                    if code == "185:MSTR":
+                        results.append(_unrelated_public_score(candidate_id, code))
+                        continue
+                    case = cases[code]
+                    results.append(_grounded_public_relation_score(
+                        candidate_id,
+                        code,
+                        business_fact=case["business"],
+                        theme_connection=case["connection"],
+                        financial_pathway=case["pathway"],
+                        relation_type=case["relation"],
+                        theme_relevance=case["theme"],
+                        public_relation_score=4.9,
+                        exposure_type=case["exposure"],
+                        article_support=0.8,
+                    ))
+                return {"results": results}
+            if kwargs.get("schema_name") == "stock_broker_narratives":
+                records_json = user.split("Records (JSON):\n", 1)[1].split(
+                    "\n\nWriting requirements:", 1,
+                )[0]
+                records = json.loads(records_json)
+                return {"items": [{
+                    "candidate_id": record["candidate_id"],
+                    "market_code": record["market_code"],
+                    "theme_rationale": {
+                        "type": "multilingual",
+                        "en": cases[record["market_code"]]["en"],
+                        "zh": cases[record["market_code"]]["zh"],
+                    },
+                } for record in records]}
+            raise AssertionError(f"unexpected LLM call: {kwargs.get('schema_name')}")
+
+    candidates = [
+        {
+            "code": code,
+            "name": case["name"],
+            "company_introduction": case["business"],
+            "candidate_lane": "event_ecosystem",
+            "candidate_provenance": ["article_body", "event_ecosystem"],
+            "rank": rank,
+        }
+        for rank, (code, case) in enumerate(cases.items(), 1)
+    ] + [{
+        "code": "185:MSTR",
+        "name": "Strategy",
+        "company_introduction": "Strategy holds bitcoin and sells enterprise software.",
+        "candidate_lane": "broad_liquidity",
+        "candidate_provenance": ["broad_liquidity"],
+        "rank": 99,
+    }]
+    workflow = ThemeWorkflow(
+        AppleEcosystemLLM(), FakeQuotes(), {"relevance_batch": 20},
+    )
+    selected, etf_evidence = workflow.screen_stock_sets(
+        candidates,
+        {"theme_direction": "bullish", "summary": "Apple CEO succession planning."},
+        {
+            "title": "Apple leadership transition",
+            "text": " ".join(
+                f"{case['name']} reports that {case['business']} "
+                f"{case['name']} reports that {case['connection']}"
+                for case in cases.values()
+            ),
+        },
+        8,
+    )
+    accepted, narrative = workflow.finalize_stock_rationales(
+        {"theme": "Apple CEO succession"},
+        {"theme_direction": "bullish", "summary": "Apple CEO succession planning."},
+        selected,
+        8,
+    )
+
+    accepted_codes = {candidate["code"] for candidate in accepted}
+    assert len(accepted) == 8
+    assert {"185:AAPL", "185:TSM", "185:GOOGL", "185:MU"} <= accepted_codes
+    assert "185:MSTR" not in accepted_codes
+    assert "185:MSTR" not in narrative
+    assert narrative["185:AAPL"]["theme_rationale"]["en"].startswith("Apple designs")
+    assert narrative["185:TSM"]["theme_rationale"]["en"].startswith("TSMC fabricates")
+    assert narrative["185:GOOGL"]["theme_rationale"]["en"].startswith("Alphabet operates")
+    assert narrative["185:MU"]["theme_rationale"]["en"].startswith("Micron sells")
+    fingerprints = {
+        workflow._narrative_fingerprint(
+            candidate, narrative[candidate["code"]]["theme_rationale"],
+        )
+        for candidate in accepted
+    }
+    assert len(fingerprints) == 8
+    public = workflow._assemble(
+        accepted, narrative, "2026-09-02", "bullish",
+    )
+    assert len(public) == 8
+    assert all(item["theme_rationale"]["en"] for item in public)
+    assert all(item["theme_rationale"]["zh"] for item in public)
+    assert {candidate["code"] for candidate in etf_evidence} < accepted_codes
+
+
+def test_near_duplicate_stock_copy_retries_only_duplicate_without_substitution():
+    def candidate(code, name, business, connection, pathway, rank):
+        return {
+            "candidate_id": f"S{rank:04d}",
+            "code": code,
+            "name": name,
+            "company_introduction": business,
+            "business_fact": business,
+            "theme_connection": connection,
+            "financial_pathway": pathway,
+            "relation_type": "supplier",
+            "directional_effect": "positive",
+            "rank": rank,
+        }
+
+    alpha = candidate(
+        "185:AAA", "Alpha", "Alpha makes HBM modules",
+        "AI accelerator programs require HBM modules",
+        "More accelerator deployments can lift HBM orders, revenue, and earnings", 1,
+    )
+    beta = candidate(
+        "185:BBB", "Beta", "Beta makes HBM modules",
+        "AI accelerator programs require HBM modules",
+        "More accelerator deployments can lift HBM orders, revenue, and earnings", 2,
+    )
+    gamma = candidate(
+        "185:CCC", "Gamma", "Gamma builds liquid cooling systems",
+        "Dense AI data centers require liquid cooling systems",
+        "Rack deployments can raise cooling-equipment orders, revenue, and earnings", 3,
+    )
+    calls = []
+    first_alpha = (
+        "Alpha makes HBM modules for AI accelerator programs, so increasing "
+        "accelerator deployments lift HBM orders, revenue, and earnings."
+    )
+
+    class DuplicateThenReserveLLM:
+        def chat_json(self, system, user, **kwargs):
+            records = _narrative_records(user)
+            items = []
+            for record in records:
+                code = record["market_code"]
+                calls.append(code)
+                if code == "185:AAA":
+                    en = first_alpha
+                    zh = (
+                        "Alpha主营HBM modules；AI accelerator programs require "
+                        "HBM modules，accelerator deployments可提升HBM订单、"
+                        "收入和盈利。"
+                    )
+                elif code == "185:BBB":
+                    # One-word variation remains a near-duplicate after identity removal.
+                    en = (
+                        "Beta makes HBM modules for AI accelerator programs, so rising "
+                        "accelerator deployments lift HBM orders, revenue, and earnings."
+                    )
+                    zh = (
+                        "Beta主营HBM modules；AI accelerator programs require "
+                        "HBM modules，accelerator deployments可提升HBM订单、"
+                        "收入和盈利。"
+                    )
+                else:
+                    en = (
+                        "Gamma builds liquid cooling systems for dense AI data centers, so "
+                        "rack deployments raise cooling-equipment orders, revenue, and earnings."
+                    )
+                    zh = (
+                        "Gamma主营liquid cooling systems；dense AI data centers"
+                        "需要liquid cooling systems，rack deployments可提升"
+                        "订单、收入和盈利。"
+                    )
+                items.append({
+                    "candidate_id": record["candidate_id"],
+                    "market_code": code,
+                    "theme_rationale": {
+                        "type": "multilingual", "en": en, "zh": zh,
+                    },
+                })
+            return {"items": items}
+
+    workflow = ThemeWorkflow(DuplicateThenReserveLLM(), FakeQuotes())
+    workflow._last_stock_public_reserves = [gamma]
+    accepted, narratives = workflow.finalize_stock_rationales(
+        {"theme": "AI accelerator buildout"},
+        {"theme_direction": "bullish"},
+        [alpha, beta], 2,
+    )
+
+    assert [row["code"] for row in accepted] == ["185:AAA", "185:BBB"]
+    assert narratives["185:AAA"]["theme_rationale"]["en"] == first_alpha
+    assert calls.count("185:AAA") == 1
+    assert calls.count("185:BBB") == 2
+    assert calls.count("185:CCC") == 0
+    assert narratives["185:BBB"]["theme_rationale"]["en"] != first_alpha
+
+
+def test_stock_narrative_requires_exact_candidate_id_and_full_market_code():
+    candidate = {
+        "candidate_id": "S0001", "code": "185:MU", "name": "Micron",
+        "company_introduction": "Micron sells HBM memory",
+        "business_fact": "Micron sells HBM memory",
+        "theme_connection": "AI accelerators require HBM memory",
+        "financial_pathway": "More HBM demand can lift revenue and earnings",
+    }
+    calls = 0
+
+    class TickerOnlyNarrator:
+        def chat_json(self, system, user, **kwargs):
+            nonlocal calls
+            calls += 1
+            return {"items": [{
+                "candidate_id": "S0001",
+                "market_code": "MU",
+                "theme_rationale": {
+                    "type": "multilingual",
+                    "en": (
+                        "Micron sells HBM memory for AI accelerators, so rising demand "
+                        "can lift memory revenue and earnings."
+                    ),
+                    "zh": "美光销售用于AI加速器的HBM；需求增长可提升存储收入和盈利。",
+                },
+            }]}
+
+    workflow = ThemeWorkflow(TickerOnlyNarrator(), FakeQuotes())
+    assert workflow.narrate(
+        {"theme": "AI memory"}, {"theme_direction": "bullish"},
+        [candidate], "stock",
+    ) == {}
+    assert calls == 2
+    assert candidate["code"] in workflow._last_stock_narrative_errors
+
+
+def test_stock_narrative_rejects_directionally_mismatched_earnings_pathway():
+    candidate = {
+        "code": "185:NVDA", "name": "NVIDIA",
+        "business_fact": "NVIDIA sells AI accelerator processors",
+        "theme_connection": "Lower AI budgets reduce accelerator demand",
+        "financial_pathway": "Fewer orders can pressure revenue and earnings",
+        "directional_effect": "negative",
+    }
+    bullish_copy = {
+        "type": "multilingual",
+        "en": (
+            "NVIDIA sells AI accelerator processors; lower AI budgets reduce "
+            "accelerator demand, but more orders can lift revenue and earnings."
+        ),
+        "zh": (
+            "NVIDIA主营AI加速器处理器；AI预算下降会减少加速器"
+            "需求，但更多订单可提升收入和盈利。"
+        ),
+    }
+
+    rationale, reason = ThemeWorkflow._validate_stock_narrative(
+        candidate, bullish_copy)
+    assert rationale is None
+    assert reason == "direction_mismatch"
+
+
+def test_stock_relevance_rejects_wrong_numeric_types_and_out_of_range_values():
+    valid = _fake_stock_score(
+        "185:MU | S0001 | Micron | business=Micron sells HBM memory chips",
+        4.5,
+    )
+    assert workflow_module._normalise_relevance_object(
+        valid, require_public_fields=True,
+    )["relevance_status"] == "scored"
+
+    invalid_values = (
+        ("theme_relevance", "4.5"),
+        ("theme_relevance", 0.9),
+        ("theme_relevance", 5.1),
+        ("confidence", True),
+        ("confidence", -0.1),
+        ("confidence", 1.1),
+        ("article_support", "0.5"),
+        ("article_support", -0.1),
+        ("article_support", 1.1),
+        ("public_relation_score", "4.5"),
+        ("public_relation_score", 0.9),
+        ("public_relation_score", 5.1),
+        ("public_relation_confidence", "0.9"),
+        ("public_relation_confidence", -0.1),
+        ("public_relation_confidence", 1.1),
+    )
+    for field, invalid in invalid_values:
+        payload = dict(valid)
+        payload[field] = invalid
+        normalized = workflow_module._normalise_relevance_object(
+            payload, require_public_fields=True,
+        )
+        assert normalized["relevance_status"] == "invalid_schema", (
+            f"{field}={invalid!r} was coerced or clamped instead of rejected"
+        )
+
+
+def test_stock_narrative_rejects_list_valued_language_fields():
+    candidate = {
+        "code": "185:MU", "name": "Micron",
+        "business_fact": "Micron sells HBM memory chips",
+        "theme_connection": "AI accelerators require HBM memory chips",
+        "financial_pathway": "More HBM orders can lift revenue and earnings",
+    }
+    en = (
+        "Micron sells HBM memory chips for AI accelerators, so rising HBM "
+        "orders can lift memory revenue and earnings."
+    )
+    zh = "美光销售用于AI加速器的HBM存储芯片；HBM订单增长可提升存储收入和盈利。"
+    for field, invalid in (("en", [en]), ("zh", [zh])):
+        rationale = {"type": "multilingual", "en": en, "zh": zh}
+        rationale[field] = invalid
+        accepted, reason = ThemeWorkflow._validate_stock_narrative(
+            candidate, rationale,
+        )
+        assert accepted is None, f"list-valued {field} was stringified and accepted"
+        assert reason == "invalid_or_forbidden_prose"
+
+
+def test_stock_narrative_rejects_vacuous_business_fact_tokens():
+    candidate = {
+        "code": "185:MU", "name": "Micron",
+        "business_fact": "The company provides services with their business",
+        "theme_connection": "AI accelerators require HBM memory chips",
+        "financial_pathway": "More HBM orders can lift revenue and earnings",
+    }
+    rationale = {
+        "type": "multilingual",
+        "en": (
+            "Micron sells HBM memory chips for AI accelerators, so rising HBM "
+            "orders can lift memory revenue and earnings."
+        ),
+        "zh": "美光销售用于AI加速器的HBM存储芯片；HBM订单增长可提升存储收入和盈利。",
+    }
+
+    accepted, reason = ThemeWorkflow._validate_stock_narrative(
+        candidate, rationale,
+    )
+    assert accepted is None
+    assert reason == "missing_business_fact"
+
+
+def test_stock_narrative_rejects_vacuous_theme_connection_tokens():
+    candidate = {
+        "code": "185:MU", "name": "Micron",
+        "business_fact": "Micron sells HBM memory chips",
+        "theme_connection": "This event relationship with the exact theme",
+        "financial_pathway": "More HBM orders can lift revenue and earnings",
+    }
+    rationale = {
+        "type": "multilingual",
+        "en": (
+            "Micron sells HBM memory chips; more HBM orders can lift revenue "
+            "and earnings."
+        ),
+        "zh": "Micron主营HBM存储芯片；更多HBM订单可提升收入和盈利。",
+    }
+
+    accepted, reason = ThemeWorkflow._validate_stock_narrative(
+        candidate, rationale,
+    )
+    assert accepted is None
+    assert reason == "missing_event_relationship"
+
+
+def test_exhausted_stock_narrative_service_uses_same_code_fallback():
+    candidate = {
+        "candidate_id": "S0001", "code": "185:MU", "name": "Micron",
+        "company_introduction": "Micron sells HBM memory",
+        "business_fact": "Micron sells HBM memory",
+        "theme_connection": "AI accelerators require HBM memory",
+        "financial_pathway": "More HBM demand can lift revenue and earnings",
+    }
+
+    class ExhaustedLLM:
+        calls = 0
+
+        def chat_json(self, system, user, **kwargs):
+            self.calls += 1
+            raise RuntimeError("429 retry budget exhausted")
+
+    llm = ExhaustedLLM()
+    workflow = ThemeWorkflow(llm, FakeQuotes())
+    diagnostics = io.StringIO()
+    with contextlib.redirect_stderr(diagnostics):
+        accepted, narratives = workflow.finalize_stock_rationales(
+            {"theme": "AI memory"}, {"theme_direction": "bullish"},
+            [candidate], 1,
+        )
+    assert accepted == [candidate]
+    assert set(narratives) == {"185:MU"}
+    assert narratives["185:MU"]["theme_rationale"]["en"]
+    assert "expected=1 received=0 missing=185:MU" in diagnostics.getvalue()
+    assert llm.calls == 2
+
+
+def test_security_selection_and_etf_scoring_finish_before_stock_narration():
+    stages = []
+
+    class OrderedWorkflow(ThemeWorkflow):
+        def finalize_stock_rationales(self, *args, **kwargs):
+            stages.append("stock_narration")
+            return super().finalize_stock_rationales(*args, **kwargs)
+
+        def rerank_etfs_from_components(self, *args, **kwargs):
+            stages.append("etf_components")
+            return super().rerank_etfs_from_components(*args, **kwargs)
+
+    OrderedWorkflow(
+        FakeLLM(), FakeQuotes(),
+        {"stock_universe": 20, "etf_universe": 20},
+    ).run({
+        "theme": "AI memory", "date": "2026-07-09",
+        "url": "https://example.com/x",
+    })
+
+    assert stages.index("etf_components") < stages.index("stock_narration")
+
+
+def _apple_broker_validation_candidate():
+    return {
+        "candidate_id": "S0001",
+        "code": "185:AAPL",
+        "name": "Apple",
+        "company_introduction": (
+            "Apple designs and sells smartphones and digital services"
+        ),
+        "business_fact": (
+            "Apple designs and sells smartphones and digital services"
+        ),
+        "theme_connection": (
+            "CEO succession affects Apple product execution and device roadmap"
+        ),
+        "financial_pathway": (
+            "Execution can lift device sales, services revenue, and earnings"
+        ),
+        "directional_effect": "positive",
+    }
+
+
+def test_public_relation_gate_rejects_invented_partner_contract():
+    candidate = {
+        "code": "185:MSTR",
+        "name": "Strategy",
+        "company_introduction": "Strategy sells software and holds bitcoin",
+        "relevance_status": "scored",
+        "public_relation_score": 5.0,
+        "public_relation_confidence": 0.95,
+        "relation_type": "partner",
+        "directional_effect": "positive",
+        "business_fact": "Strategy sells enterprise software and holds bitcoin",
+        "theme_connection": (
+            "Strategy advises Apple under a CEO-services contract"
+        ),
+        "financial_pathway": (
+            "The contract can lift advisory revenue and earnings"
+        ),
+        "evidence_basis": "company_profile",
+        "article_support": 0.0,
+        "candidate_provenance": ["broad_liquidity"],
+        "impact_channel": "revenue_demand",
+        "exposure_type": "beneficiary",
+    }
+    assert not workflow_module._is_public_relation_eligible(
+        candidate,
+        theme_direction="bullish",
+        min_confidence=0.55,
+        article={"title": "Apple CEO", "text": "Apple succession planning"},
+    )
+
+
+def test_public_relation_gate_rejects_lowercase_invented_partner_counterparty():
+    candidate = {
+        "code": "185:MSTR",
+        "name": "Strategy",
+        "company_introduction": (
+            "Strategy sells enterprise software and holds bitcoin"
+        ),
+        "relevance_status": "scored",
+        "public_relation_score": 5.0,
+        "public_relation_confidence": 0.95,
+        "relation_type": "partner",
+        "directional_effect": "positive",
+        "business_fact": (
+            "Strategy sells enterprise software and holds bitcoin"
+        ),
+        "theme_connection": (
+            "Enterprise software integration with apple accelerates its CEO transition"
+        ),
+        "financial_pathway": (
+            "The integration can lift software revenue and earnings"
+        ),
+        "evidence_basis": "company_profile",
+        "article_support": 0.0,
+        "candidate_provenance": ["broad_liquidity"],
+        "impact_channel": "revenue_demand",
+        "exposure_type": "beneficiary",
+    }
+    assert not workflow_module._is_public_relation_eligible(
+        candidate,
+        theme_direction="bullish",
+        min_confidence=0.55,
+        article={"title": "Apple CEO", "text": "Apple succession planning"},
+    )
+
+
+def test_public_relation_gate_rejects_direct_alien_mining_from_one_generic_overlap():
+    candidate = {
+        "code": "185:MSTR",
+        "name": "Strategy",
+        "company_introduction": (
+            "Strategy sells enterprise software and holds bitcoin"
+        ),
+        "relevance_status": "scored",
+        "public_relation_score": 5.0,
+        "public_relation_confidence": 0.95,
+        "relation_type": "direct",
+        "directional_effect": "positive",
+        "business_fact": (
+            "Strategy sells enterprise software and holds bitcoin"
+        ),
+        "theme_connection": (
+            "Software enables alien-mining launches and captures new demand"
+        ),
+        "financial_pathway": (
+            "Alien-mining demand can lift software revenue and earnings"
+        ),
+        "evidence_basis": "company_profile",
+        "article_support": 0.0,
+        "candidate_provenance": ["broad_liquidity"],
+        "impact_channel": "revenue_demand",
+        "exposure_type": "direct",
+    }
+    assert not workflow_module._is_public_relation_eligible(
+        candidate,
+        theme_direction="bullish",
+        min_confidence=0.55,
+        article={"title": "Alien mining", "text": "Alien-mining launches"},
+    )
+
+
+def test_generated_event_brief_cannot_self_ground_an_unrelated_stock():
+    candidate = {
+        "code": "185:MSTR",
+        "name": "Strategy",
+        "company_introduction": (
+            "Strategy sells enterprise analytics software and holds bitcoin"
+        ),
+        "relevance_status": "scored",
+        "public_relation_score": 5.0,
+        "public_relation_confidence": 0.95,
+        "relation_type": "direct",
+        "directional_effect": "positive",
+        "business_fact": "Strategy sells enterprise analytics software",
+        "theme_connection": (
+            "Strategy analytics software shapes Apple device analytics roadmap"
+        ),
+        "financial_pathway": (
+            "Software demand can lift revenue and earnings"
+        ),
+        "evidence_basis": "derived",
+        "article_support": 0.0,
+        "candidate_provenance": ["broad_liquidity"],
+        "impact_channel": "revenue_demand",
+        "exposure_type": "direct",
+    }
+    hallucinated_brief = {
+        "input_theme": "Apple CEO succession",
+        "theme_direction": "bullish",
+        "summary": (
+            "Strategy analytics and bitcoin systems drive Apple's device roadmap"
+        ),
+        "keywords": ["enterprise analytics", "bitcoin systems"],
+        "direct_beneficiaries": ["Strategy"],
+        "title_lede_entities": [{"name": "Apple"}],
+    }
+    assert not workflow_module._is_public_relation_eligible(
+        candidate,
+        theme_direction="bullish",
+        min_confidence=0.55,
+        article={
+            "title": "Apple CEO transition",
+            "text": "Apple named a CEO to oversee its device roadmap.",
+        },
+        brief=hallucinated_brief,
+    )
+
+
+def test_single_broad_concept_cannot_bridge_unrelated_company_to_ceo_event():
+    candidate = {
+        "code": "185:MSTR", "name": "Strategy",
+        "company_introduction": "Strategy sells enterprise software",
+        "relevance_status": "scored",
+        "public_relation_score": 5.0,
+        "public_relation_confidence": 0.95,
+        "relation_type": "complementary",
+        "directional_effect": "positive",
+        "business_fact": "Strategy sells enterprise software",
+        "theme_connection": "Enterprise software and Apple CEO succession",
+        "financial_pathway": "Software sales can lift revenue and earnings",
+        "evidence_basis": "derived",
+        "article_support": 0.0,
+        "candidate_provenance": ["event_ecosystem"],
+        "impact_channel": "revenue_demand",
+        "exposure_type": "beneficiary",
+    }
+    article = {
+        "title": "Apple names its next CEO",
+        "text": "Apple names its next CEO.",
+    }
+    brief = {"input_theme": "Apple software CEO succession"}
+    assert not workflow_module._public_relation_evidence_is_grounded(
+        candidate, article, brief)
+    assert not workflow_module._is_public_relation_eligible(
+        candidate,
+        theme_direction="bullish",
+        min_confidence=0.55,
+        article=article,
+        brief=brief,
+    )
+
+
+def test_short_common_ticker_is_not_a_literal_article_identity():
+    assert not workflow_module._entity_is_mentioned(
+        {"name": "onsemi", "ticker": "ON"},
+        "Apple focuses on manufacturing devices.",
+    )
+    assert workflow_module._entity_is_mentioned(
+        {"name": "onsemi", "ticker": "ON"},
+        "Shares of $ON rose after the announcement.",
+    )
+    assert not workflow_module._entity_is_mentioned(
+        {"name": "C3.ai", "ticker": "AI"},
+        "Artificial intelligence (AI) spending is rising.",
+    )
+    assert not workflow_module._entity_is_mentioned(
+        {"name": "Gartner", "ticker": "IT"},
+        "Information technology (IT) budgets are expanding.",
+    )
+    assert workflow_module._entity_is_mentioned(
+        {"name": "C3.ai", "ticker": "AI"},
+        "C3.ai (NYSE: AI) reported results.",
+    )
+    candidate = {
+        "code": "185:ON", "name": "onsemi",
+        "company_introduction": "onsemi manufactures semiconductor chips",
+        "relevance_status": "scored",
+        "public_relation_score": 5.0,
+        "public_relation_confidence": 0.95,
+        "relation_type": "supplier",
+        "directional_effect": "positive",
+        "business_fact": "onsemi manufactures semiconductor chips",
+        "theme_connection": "Apple manufacturing devices",
+        "financial_pathway": "Device orders can lift chip revenue and earnings",
+        "evidence_basis": "combined",
+        "article_support": 1.0,
+        "candidate_provenance": ["article_body"],
+        "impact_channel": "supply_chain_orders",
+        "exposure_type": "supply_chain",
+    }
+    article = {
+        "title": "Apple manufacturing update",
+        "text": "Apple focuses on manufacturing devices.",
+    }
+    assert not workflow_module._is_public_relation_eligible(
+        candidate,
+        theme_direction="bullish",
+        min_confidence=0.55,
+        article=article,
+        brief={"input_theme": "Apple manufacturing devices"},
+    )
+
+
+def test_common_word_issuer_cannot_self_ground_from_an_ordinary_imperative():
+    candidate = {
+        "code": "185:TOST", "name": "Toast",
+        "company_introduction": "Toast provides restaurant payment software",
+        "relevance_status": "scored",
+        "public_relation_score": 5.0,
+        "public_relation_confidence": 0.95,
+        "relation_type": "direct",
+        "directional_effect": "positive",
+        "business_fact": "Toast provides restaurant payment software",
+        "theme_connection": "AI cloud launches increase restaurant software demand",
+        "financial_pathway": "Software demand can lift revenue and earnings",
+        "evidence_basis": "combined",
+        "article_support": 1.0,
+        "candidate_provenance": ["article_body"],
+        "impact_channel": "revenue_demand",
+        "exposure_type": "direct",
+    }
+    article = {
+        "title": "AI cloud launch celebration",
+        "text": "Toast the success of AI cloud launches.",
+    }
+    assert not workflow_module._is_public_relation_eligible(
+        candidate,
+        theme_direction="bullish",
+        min_confidence=0.55,
+        article=article,
+        brief={"input_theme": "AI cloud launches"},
+    )
+
+
+def test_adjacent_third_party_relation_is_not_attributed_to_candidate():
+    candidate = {
+        "code": "185:TSM", "name": "TSMC",
+        "company_introduction": "TSMC manufactures semiconductor chips",
+        "relevance_status": "scored",
+        "public_relation_score": 5.0,
+        "public_relation_confidence": 0.95,
+        "relation_type": "partner",
+        "directional_effect": "positive",
+        "business_fact": "TSMC manufactures semiconductor chips",
+        "theme_connection": "Apple partnership covers devices",
+        "financial_pathway": "The partnership can lift chip revenue and earnings",
+        "evidence_basis": "combined",
+        "article_support": 1.0,
+        "candidate_provenance": ["article_body"],
+        "impact_channel": "revenue_demand",
+        "exposure_type": "beneficiary",
+    }
+    article = {
+        "title": "Apple and TSMC update",
+        "text": (
+            "TSMC manufactures semiconductor chips. "
+            "Apple partnership with Acme covers devices."
+        ),
+    }
+    evidence = workflow_module._article_entity_evidence_text(
+        candidate, f"{article['title']}. {article['text']}")
+    assert "TSMC manufactures semiconductor chips" in evidence
+    assert "partnership with Acme" not in evidence
+    assert not workflow_module._is_public_relation_eligible(
+        candidate,
+        theme_direction="bullish",
+        min_confidence=0.55,
+        article=article,
+        brief={"input_theme": "Apple partnership devices"},
+    )
+
+
+def test_adversative_neighbor_clause_cannot_launder_a_direct_relationship():
+    candidate = {
+        "code": "185:TSM", "name": "TSMC",
+        "company_introduction": "TSMC manufactures semiconductor chips",
+        "relevance_status": "scored",
+        "public_relation_score": 5.0,
+        "public_relation_confidence": 0.95,
+        "relation_type": "direct",
+        "directional_effect": "positive",
+        "business_fact": "TSMC manufactures semiconductor chips",
+        "theme_connection": "Apple CEO advances its AI roadmap",
+        "financial_pathway": "AI chip demand can lift revenue and earnings",
+        "evidence_basis": "combined",
+        "article_support": 1.0,
+        "candidate_provenance": ["article_body"],
+        "impact_channel": "revenue_demand",
+        "exposure_type": "direct",
+    }
+    article = {
+        "title": "Semiconductor and leadership update",
+        "text": (
+            "TSMC manufactures semiconductor chips, while Apple CEO advances "
+            "its AI roadmap."
+        ),
+    }
+    evidence = workflow_module._article_entity_evidence_text(
+        candidate, f"{article['title']}. {article['text']}")
+    assert "TSMC manufactures semiconductor chips" in evidence
+    assert "Apple CEO advances" not in evidence
+    assert not workflow_module._is_public_relation_eligible(
+        candidate,
+        theme_direction="bullish",
+        min_confidence=0.55,
+        article=article,
+        brief={"input_theme": "Apple CEO AI roadmap"},
+    )
+
+
+def test_and_neighbor_clause_cannot_launder_a_direct_relationship():
+    candidate = {
+        "code": "185:TSM", "name": "TSMC",
+        "company_introduction": "TSMC manufactures semiconductor chips",
+        "relevance_status": "scored",
+        "public_relation_score": 5.0,
+        "public_relation_confidence": 0.95,
+        "relation_type": "direct",
+        "directional_effect": "positive",
+        "business_fact": "TSMC manufactures semiconductor chips",
+        "theme_connection": "Apple CEO advances its AI roadmap",
+        "financial_pathway": "AI chip demand can lift revenue and earnings",
+        "evidence_basis": "combined",
+        "article_support": 1.0,
+        "candidate_provenance": ["article_body"],
+        "impact_channel": "revenue_demand",
+        "exposure_type": "direct",
+    }
+    for separator in (" and ", ", and "):
+        article = {
+            "title": "Semiconductor and leadership update",
+            "text": (
+                f"TSMC manufactures semiconductor chips{separator}"
+                "Apple CEO advances its AI roadmap."
+            ),
+        }
+        clauses = workflow_module._relationship_source_clauses(article["text"])
+        assert clauses == [
+            "TSMC manufactures semiconductor chips",
+            "Apple CEO advances its AI roadmap",
+        ]
+        assert not workflow_module._is_public_relation_eligible(
+            candidate,
+            theme_direction="bullish",
+            min_confidence=0.55,
+            article=article,
+            brief={"input_theme": "Apple CEO AI roadmap"},
+        )
+
+
+def test_relation_clause_parser_preserves_coordinated_parties_but_splits_negation():
+    supplier = {
+        "code": "185:NVDA",
+        "name": "NVIDIA",
+        "relation_type": "supplier",
+        "theme_connection": (
+            "CoreWeave and Nebius expansion increases demand for "
+            "AI infrastructure components"
+        ),
+    }
+    supplier_tokens = workflow_module._grounding_tokens(
+        supplier["theme_connection"],
+        supplier,
+        stopwords=(
+            workflow_module._GROUNDING_RELATION_STOPWORDS
+            | workflow_module._SOURCE_RELATION_GENERIC_STOPWORDS
+        ),
+    )
+    assert workflow_module._source_supports_relation(
+        supplier,
+        supplier_tokens,
+        "NVIDIA supplies AI infrastructure components as CoreWeave and "
+        "Nebius expansion increases demand for AI infrastructure components.",
+    )
+
+    denied_partner = {
+        "code": "185:MSTR",
+        "name": "Strategy",
+        "relation_type": "partner",
+        "theme_connection": "Strategy has an Apple partnership for software",
+    }
+    denied_tokens = workflow_module._grounding_tokens(
+        denied_partner["theme_connection"],
+        denied_partner,
+        stopwords=(
+            workflow_module._GROUNDING_RELATION_STOPWORDS
+            | workflow_module._SOURCE_RELATION_GENERIC_STOPWORDS
+        ),
+    )
+    assert not workflow_module._source_supports_relation(
+        denied_partner,
+        denied_tokens,
+        "Strategy partners with IBM and has no Apple partnership for software.",
+    )
+
+
+def test_adjacent_shared_noun_cannot_launder_an_event_relationship():
+    candidate = {
+        "code": "185:MSTR",
+        "name": "Strategy",
+        "company_introduction": "Strategy sells enterprise analytics software",
+        "relevance_status": "scored",
+        "public_relation_score": 5.0,
+        "public_relation_confidence": 0.95,
+        "relation_type": "direct",
+        "directional_effect": "positive",
+        "business_fact": "Strategy sells enterprise analytics software",
+        "theme_connection": (
+            "Strategy enterprise analytics software shapes Apple device analytics roadmap"
+        ),
+        "financial_pathway": "Software demand can lift revenue and earnings",
+        "evidence_basis": "derived",
+        "article_support": 1.0,
+        "candidate_provenance": ["article_body"],
+        "impact_channel": "revenue_demand",
+        "exposure_type": "direct",
+    }
+    assert not workflow_module._is_public_relation_eligible(
+        candidate,
+        theme_direction="bullish",
+        min_confidence=0.55,
+        article={
+            "title": "Apple CEO transition",
+            "text": (
+                "Strategy sells enterprise analytics software. "
+                "Apple named a CEO to oversee its device analytics roadmap."
+            ),
+        },
+        brief={"input_theme": "Apple CEO succession"},
+    )
+
+
+def test_public_relation_gate_rejects_an_invented_financial_product_pathway():
+    candidate = {
+        "code": "185:AAPL",
+        "name": "Apple",
+        "company_introduction": (
+            "Apple designs smartphones and operates digital services"
+        ),
+        "relevance_status": "scored",
+        "public_relation_score": 5.0,
+        "public_relation_confidence": 0.95,
+        "relation_type": "direct",
+        "directional_effect": "positive",
+        "business_fact": "Apple designs smartphones and operates digital services",
+        "theme_connection": (
+            "CEO succession affects Apple product execution and device roadmap"
+        ),
+        "financial_pathway": "Device sales can lift revenue and earnings",
+        "evidence_basis": "combined",
+        "article_support": 1.0,
+        "candidate_provenance": ["article_body"],
+        "impact_channel": "revenue_demand",
+        "exposure_type": "direct",
+    }
+    article = {
+        "title": "Apple CEO succession",
+        "text": (
+            "Apple designs smartphones and operates digital services. "
+            "CEO succession affects Apple product execution and device roadmap."
+        ),
+    }
+    brief = {
+        "input_theme": "Apple CEO succession",
+        "title_lede_entities": [{"name": "Apple"}],
+    }
+    assert workflow_module._is_public_relation_eligible(
+        candidate,
+        theme_direction="bullish",
+        min_confidence=0.55,
+        article=article,
+        brief=brief,
+    )
+    candidate["financial_pathway"] = (
+        "Reactor orders can lift revenue and earnings"
+    )
+    assert not workflow_module._is_public_relation_eligible(
+        candidate,
+        theme_direction="bullish",
+        min_confidence=0.55,
+        article=article,
+        brief=brief,
+    )
+
+
+def test_stock_narrative_requires_business_event_financial_order():
+    candidate = _apple_broker_validation_candidate()
+    reversed_copy = {
+        "type": "multilingual",
+        "en": (
+            "CEO succession affects Apple product execution and device roadmap, "
+            "which can lift device sales, services revenue, and earnings; Apple "
+            "designs and sells smartphones and digital services."
+        ),
+        "zh": (
+            "首席执行官继任影响Apple产品执行和设备路线图，可提升"
+            "设备销售、服务收入和盈利；Apple设计并经营智能手机"
+            "和数字服务。"
+        ),
+    }
+    rationale, reason = ThemeWorkflow._validate_stock_narrative(
+        candidate, reversed_copy)
+    assert rationale is None
+    assert reason == "reasoning_order_mismatch"
+
+
+def test_stock_narrative_rejects_negated_directional_verbs():
+    candidate = _apple_broker_validation_candidate()
+    negated_copy = {
+        "type": "multilingual",
+        "en": (
+            "Apple designs smartphones, but CEO succession cannot lift device "
+            "revenue or earnings for shareholders."
+        ),
+        "zh": (
+            "Apple设计智能手机，但首席执行官更替不会提升设备收入或盈利。"
+        ),
+    }
+    rationale, reason = ThemeWorkflow._validate_stock_narrative(
+        candidate, negated_copy)
+    assert rationale is None
+    assert reason == "direction_mismatch"
+
+
+def test_stock_narrative_rejects_semantically_unrelated_chinese_copy():
+    candidate = _apple_broker_validation_candidate()
+    mismatched_copy = {
+        "type": "multilingual",
+        "en": (
+            "Apple designs and sells smartphones and digital services; CEO "
+            "succession affects Apple product execution and device roadmap, which "
+            "can lift device sales, services revenue, and earnings."
+        ),
+        "zh": (
+            "Apple主营smartphones和digital services；device sales可提升"
+            "services收入和盈利。"
+        ),
+    }
+    rationale, reason = ThemeWorkflow._validate_stock_narrative(
+        candidate, mismatched_copy)
+    assert rationale is None
+    assert reason == "missing_chinese_event_relationship"
+
+
+def test_stock_narrative_rejects_invented_chinese_counterparty_and_product():
+    candidate = {
+        "code": "185:TSM", "name": "TSMC",
+        "company_introduction": "TSMC manufactures semiconductor chips",
+        "business_fact": "TSMC manufactures semiconductor chips",
+        "theme_connection": "AI demand requires semiconductor chips",
+        "financial_pathway": "More chip orders can lift revenue and earnings",
+        "directional_effect": "positive",
+    }
+    en = (
+        "TSMC manufactures semiconductor chips; AI demand requires more chips, "
+        "which can lift chip orders, revenue, and earnings."
+    )
+    bad_chinese = (
+        "TSMC制造半导体芯片；为英伟达的AI需求供应芯片，可提升芯片订单、收入和盈利。",
+        "TSMC制造半导体芯片；为NVIDIA的AI需求供应芯片，可提升芯片订单、收入和盈利。",
+        "TSMC制造半导体芯片；为nvidia的AI需求供应芯片，可提升芯片订单、收入和盈利。",
+        "TSMC制造半导体芯片和核反应堆；AI需求需要更多芯片，可提升芯片订单、收入和盈利。",
+    )
+    for zh in bad_chinese:
+        rationale, reason = ThemeWorkflow._validate_stock_narrative(
+            candidate,
+            {"type": "multilingual", "en": en, "zh": zh},
+        )
+        assert rationale is None
+        assert reason == "unsupported_chinese_factual_claim"
+
+
+def test_chinese_fact_translation_handles_device_equipment_polysemy():
+    candidate = {"code": "185:TER", "name": "Teradyne"}
+    equipment_evidence = (
+        "Teradyne sells semiconductor test equipment. "
+        "Equipment orders can lift revenue and earnings."
+    )
+    device_evidence = (
+        "Teradyne makes test devices. Device sales can lift revenue and earnings."
+    )
+    assert not workflow_module._unsupported_chinese_factual_content(
+        candidate,
+        "Teradyne销售半导体测试设备；设备订单可提升收入和盈利。",
+        equipment_evidence,
+    )
+    assert not workflow_module._unsupported_chinese_factual_content(
+        candidate,
+        "Teradyne制造测试设备；设备销售可提升收入和盈利。",
+        device_evidence,
+    )
+    assert "设备" in workflow_module._unsupported_chinese_factual_content(
+        candidate,
+        "Teradyne制造测试设备；芯片订单可提升收入和盈利。",
+        "Teradyne manufactures semiconductor chips. Chip orders can lift revenue and earnings.",
+    )
+
+
+def test_stock_narrative_rejects_product_synonyms_absent_from_evidence():
+    candidate = {
+        "code": "185:TSM", "name": "TSMC",
+        "company_introduction": "TSMC manufactures semiconductor chips",
+        "business_fact": "TSMC manufactures semiconductor chips",
+        "theme_connection": "AI demand requires semiconductor chips",
+        "financial_pathway": "More chip orders can lift revenue and earnings",
+        "directional_effect": "positive",
+    }
+    rationale, reason = ThemeWorkflow._validate_stock_narrative(
+        candidate,
+        {
+            "type": "multilingual",
+            "en": (
+                "TSMC manufactures semiconductor chips and modems; AI demand "
+                "requires more chips, which can lift chip orders, revenue, and earnings."
+            ),
+            "zh": (
+                "TSMC制造半导体芯片；人工智能需求需要更多芯片，可提升芯片订单、收入和盈利。"
+            ),
+        },
+    )
+    assert rationale is None
+    assert reason == "unsupported_factual_claim"
+
+
+def test_stock_narrative_rejects_wrong_chinese_issuer_despite_matching_concepts():
+    candidate = {
+        **_apple_broker_validation_candidate(),
+        "name_zh": "苹果",
+    }
+    wrong_issuer_copy = {
+        "type": "multilingual",
+        "en": (
+            "Apple designs smartphones and digital services; CEO succession shapes "
+            "product execution, which can lift device sales, revenue, and earnings."
+        ),
+        "zh": (
+            "谷歌设计智能手机并销售数字服务；首席执行官继任影响产品执行和设备路线图，"
+            "可提升设备销售、服务收入和盈利。"
+        ),
+    }
+    rationale, _ = ThemeWorkflow._validate_stock_narrative(
+        candidate, wrong_issuer_copy)
+    assert rationale is None
+
+
+def test_stock_narrative_rejects_common_legal_token_as_english_identity():
+    candidate = {
+        "candidate_id": "S0002",
+        "code": "185:TTD",
+        "name": "The Trade Desk Inc",
+        "name_zh": "萃弈",
+        "company_introduction": (
+            "The Trade Desk Inc operates a programmatic advertising platform"
+        ),
+        "business_fact": (
+            "The Trade Desk Inc operates a programmatic advertising platform"
+        ),
+        "theme_connection": (
+            "AI bidding automation increases advertiser adoption of its platform"
+        ),
+        "financial_pathway": (
+            "Higher platform usage can lift revenue and earnings"
+        ),
+        "directional_effect": "positive",
+    }
+    common_token_copy = {
+        "type": "multilingual",
+        "en": (
+            "The programmatic advertising platform supports media buying; AI bidding "
+            "automation increases advertiser adoption, which can lift revenue and earnings."
+        ),
+        "zh": (
+            "萃弈运营程序化广告平台；AI竞价自动化增加广告主采用率，可提升收入和盈利。"
+        ),
+    }
+    rationale, reason = ThemeWorkflow._validate_stock_narrative(
+        candidate, common_token_copy)
+    assert rationale is None
+    assert reason == "missing_company_identity"
+
+
+def test_stock_narrative_rejects_soft_and_absolute_negations_in_both_languages():
+    candidate = _apple_broker_validation_candidate()
+    cases = (
+        {
+            "type": "multilingual",
+            "en": (
+                "Apple designs smartphones; CEO succession is unlikely to lift device "
+                "sales, services revenue, or earnings."
+            ),
+            "zh": (
+                "Apple设计智能手机；首席执行官继任可提升设备销售、服务收入和盈利。"
+            ),
+        },
+        {
+            "type": "multilingual",
+            "en": (
+                "Apple designs smartphones; CEO succession will never lift device "
+                "sales, services revenue, or earnings."
+            ),
+            "zh": (
+                "Apple设计智能手机；首席执行官继任可提升设备销售、服务收入和盈利。"
+            ),
+        },
+        {
+            "type": "multilingual",
+            "en": (
+                "Apple designs smartphones; CEO succession shapes product execution, "
+                "which can lift device sales, services revenue, and earnings."
+            ),
+            "zh": (
+                "Apple设计智能手机；首席执行官继任不太可能提升设备销售、服务收入和盈利。"
+            ),
+        },
+        {
+            "type": "multilingual",
+            "en": (
+                "Apple designs smartphones; CEO succession shapes product execution, "
+                "which can lift device sales, services revenue, and earnings."
+            ),
+            "zh": (
+                "Apple设计智能手机；首席执行官继任从未提升设备销售、服务收入和盈利。"
+            ),
+        },
+    )
+    for negated_copy in cases:
+        rationale, reason = ThemeWorkflow._validate_stock_narrative(
+            candidate, negated_copy)
+        assert rationale is None, negated_copy
+        assert reason == "direction_mismatch"
+
+
+def test_stock_narrative_rejects_unsupported_numerical_financial_magnitude():
+    candidate = _apple_broker_validation_candidate()
+    unsupported_magnitude_copy = {
+        "type": "multilingual",
+        "en": (
+            "Apple designs smartphones; CEO succession shapes product execution, "
+            "which can lift device revenue and earnings by 500%."
+        ),
+        "zh": (
+            "Apple设计智能手机；首席执行官继任影响产品执行，可提升设备收入和盈利500%。"
+        ),
+    }
+    rationale, _ = ThemeWorkflow._validate_stock_narrative(
+        candidate, unsupported_magnitude_copy)
+    assert rationale is None
+
+
+def test_worded_financial_magnitudes_are_detected():
+    for value in (
+        "several million dollars of revenue",
+        "a few million dollars of orders",
+        "dozens of millions in sales",
+        "roughly one billion dollars of earnings",
+        "one hundred million dollars of revenue",
+        "约数千万元收入",
+        "几亿美元订单",
+    ):
+        assert workflow_module._financial_magnitude_claims(value), value
+
+
+def test_article_body_discovery_prompts_include_full_fetched_body():
+    marker = "LateBodyIssuer manufactures advanced optical components"
+    article = {"title": "Theme update", "text": "x" * 7000 + marker}
+
+    class CapturingBodyLLM:
+        def __init__(self):
+            self.calls = []
+
+        def chat_json(self, system, user, **kwargs):
+            self.calls.append((system, user))
+            assert marker in user
+            if system == workflow_module.prompts.EVENT_ECOSYSTEM_SYS:
+                return {"entities": []}
+            return {
+                "theme_cn": "测试主题",
+                "theme_direction": "bullish",
+                "title_lede_entities": [],
+                "body_entities": [],
+            }
+
+    llm = CapturingBodyLLM()
+    workflow = ThemeWorkflow(llm, FakeQuotes())
+    profile = {"exact_theme": "Optical components", "theme_cn": "光学元件"}
+    brief = workflow.event_brief(
+        {
+            "theme": "Optical components",
+            "date": "2026-07-09",
+            "url": "https://example.com/article",
+        },
+        article,
+        profile,
+    )
+    workflow.event_ecosystem(
+        {"theme": "Optical components"}, brief, profile, article)
     assert len(llm.calls) == 2
 
 

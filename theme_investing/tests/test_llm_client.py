@@ -1,4 +1,4 @@
-"""Offline contract tests for GPT-5.6 Sol routing and LiteLLM calls."""
+"""Offline contract tests for DeepSeek routing and compatible LLM calls."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import http.client
 import io
 import json
 import os
+import ssl
 import sys
 import unittest
 import urllib.error
@@ -92,18 +93,31 @@ def request_headers(request):
     return {key.lower(): value for key, value in request.header_items()}
 
 
+def make_deepseek_config(**overrides):
+    values = {
+        "base_url": "https://api.deepseek.com/chat/completions",
+        "provider": "deepseek",
+        "model": "deepseek-flash",
+        "trace_header": None,
+        "thinking": {"type": "enabled"},
+        "verify_tls": True,
+    }
+    values.update(overrides)
+    return make_config(**values)
+
+
 def routing_env():
     return {
         "active_profiles": {"llm": "production", "quote": "production"},
         "llm_profiles": {
             "local": {
-                "provider": "litellm_openai_compatible",
-                "base_url": "https://office.example.test/litellm",
-                "api_key": "office-test-key",
-                "default_model": "gpt-5.6-sol",
+                "provider": "deepseek",
+                "base_url": "https://api.deepseek.com",
+                "api_key": "deepseek-test-key",
+                "default_model": "deepseek-flash",
                 "reasoning_effort": "low",
                 "timeout_seconds": 600,
-                "trace_header": "X-Trace-Id",
+                "request": {"thinking": {"type": "enabled"}},
             },
             "claude": {
                 "provider": "anthropic",
@@ -145,7 +159,6 @@ class LLMConfigRoutingTests(unittest.TestCase):
                 '"url":"https://example.test/article"}']
         with patch.object(sys, "argv", argv), \
                 patch("cli.load_env", return_value=routing_env()), \
-                patch("cli.refresh_c_session_if_configured", side_effect=lambda env, _path: env), \
                 patch("cli.load_llm_config", side_effect=fake_load_llm_config), \
                 patch("cli.load_quote_config", return_value=SimpleNamespace(profile="local", scene="c")), \
                 patch("cli.build_llm_client", return_value=object()), \
@@ -156,15 +169,15 @@ class LLMConfigRoutingTests(unittest.TestCase):
         self.assertEqual(status, 0)
         return captured["env"]
 
-    def test_local_target_routes_to_local_sol_profile_and_local_quotes(self):
+    def test_local_target_routes_to_deepseek_profile_and_local_quotes(self):
         env = self._run_cli_and_capture_env("--target", "local", "--no-upload")
         self.assertEqual(env["active_profiles"], {
             "llm": "local", "quote": "local",
         })
         self.assertEqual(env["llm_profiles"]["local"]["provider"],
-                         "litellm_openai_compatible")
+                         "deepseek")
         self.assertEqual(env["llm_profiles"]["local"]["default_model"],
-                         "gpt-5.6-sol")
+                         "deepseek-flash")
 
     def test_explicit_llm_profile_can_still_select_claude(self):
         env = self._run_cli_and_capture_env(
@@ -173,30 +186,63 @@ class LLMConfigRoutingTests(unittest.TestCase):
         self.assertEqual(env["active_profiles"]["llm"], "claude")
         self.assertEqual(env["llm_profiles"]["claude"]["provider"], "anthropic")
 
-    def test_local_config_defaults_to_sol_and_office_gateway(self):
+    def test_local_config_defaults_to_flash_and_official_deepseek_endpoint(self):
         env = routing_env()
         env["active_profiles"]["llm"] = "local"
         env["llm_profiles"]["local"].pop("default_model")
-        cfg = config.load_llm_config(env)
-        self.assertEqual(cfg.base_url, "https://office.example.test/litellm/v1/chat/completions")
-        self.assertEqual(cfg.api_key, "office-test-key")
-        self.assertEqual(cfg.model, "gpt-5.6-sol")
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
+            cfg = config.load_llm_config(env)
+        self.assertEqual(cfg.base_url, "https://api.deepseek.com/chat/completions")
+        self.assertEqual(cfg.api_key, "deepseek-test-key")
+        self.assertEqual(cfg.model, "deepseek-flash")
         self.assertEqual(cfg.reasoning_effort, "low")
         self.assertEqual(cfg.timeout, 600)
+        self.assertEqual(cfg.thinking, {"type": "enabled"})
+        self.assertIsNone(cfg.trace_header)
+        self.assertTrue(cfg.verify_tls)
 
-    def test_checked_in_example_defaults_to_local_sol_and_is_loadable(self):
+    def test_checked_in_example_defaults_to_local_deepseek_and_is_loadable(self):
         example_path = Path(__file__).resolve().parents[2] / "Skills" / "env.example.json"
         env = json.loads(example_path.read_text(encoding="utf-8"))
         cfg = config.load_llm_config(env)
         self.assertEqual(env["active_profiles"]["llm"], "local")
-        self.assertEqual(cfg.provider, "litellm_openai_compatible")
-        self.assertEqual(cfg.model, "gpt-5.6-sol")
+        self.assertEqual(cfg.provider, "deepseek")
+        self.assertEqual(cfg.model, "deepseek-flash")
         self.assertEqual(cfg.reasoning_effort, "low")
         self.assertEqual(cfg.max_completion_tokens, 8000)
+        self.assertEqual(cfg.thinking, {"type": "enabled"})
+        self.assertIsNone(cfg.trace_header)
+        self.assertTrue(cfg.verify_tls)
         self.assertEqual(
             cfg.base_url,
-            "https://aimemodeldev.myhexin.com/litellm/v1/chat/completions",
+            "https://api.deepseek.com/chat/completions",
         )
+        local_quotes = env["quote_profiles"]["local"]
+        self.assertNotIn("login", local_quotes["auth"])
+        self.assertEqual(local_quotes["sessionid"], "<MANUAL_SESSION_ID>")
+        self.assertEqual(local_quotes["userid"], "<MANUAL_USER_ID>")
+
+    def test_deepseek_environment_key_overrides_the_profile_key(self):
+        env = routing_env()
+        env["active_profiles"]["llm"] = "local"
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "environment-test-key"}):
+            cfg = config.load_llm_config(env)
+        self.assertEqual(cfg.api_key, "environment-test-key")
+
+    def test_deepseek_request_thinking_configuration_is_preserved(self):
+        env = routing_env()
+        env["active_profiles"]["llm"] = "local"
+        env["llm_profiles"]["local"]["request"]["thinking"] = {"type": "disabled"}
+        cfg = config.load_llm_config(env)
+        self.assertEqual(cfg.thinking, {"type": "disabled"})
+
+    def test_explicit_production_profile_preserves_litellm_routing(self):
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "environment-test-key"}):
+            cfg = config.load_llm_config(routing_env())
+        self.assertEqual(cfg.provider, "litellm_openai_compatible")
+        self.assertEqual(cfg.model, "gpt-5.6-sol")
+        self.assertEqual(cfg.base_url, "https://prod.example.test/litellm/v1/chat/completions")
+        self.assertEqual(cfg.api_key, "profile-test-key")
 
     def test_unknown_environment_has_a_clear_configuration_error(self):
         env = routing_env()
@@ -207,6 +253,98 @@ class LLMConfigRoutingTests(unittest.TestCase):
 
 
 class LLMClientTests(unittest.TestCase):
+    def test_deepseek_chat_sends_official_thinking_payload_with_verified_tls(self):
+        client = llm_client.LLMClient(make_deepseek_config(), retries=1)
+        with patch("llm_client.urllib.request.urlopen", return_value=completion("done")) as opening:
+            result = client.chat("stable instruction", "dynamic input",
+                                 temperature=0.9, max_tokens=321)
+        self.assertEqual(result, "done")
+        request = opening.call_args.args[0]
+        self.assertEqual(json.loads(request.data), {
+            "model": "deepseek-flash",
+            "stream": False,
+            "thinking": {"type": "enabled"},
+            "reasoning_effort": "low",
+            "max_tokens": 321,
+            "messages": [
+                {"role": "system", "content": "stable instruction"},
+                {"role": "user", "content": "dynamic input"},
+            ],
+        })
+        self.assertEqual(request.full_url, "https://api.deepseek.com/chat/completions")
+        headers = request_headers(request)
+        self.assertEqual(headers["authorization"], "Bearer unit-test-key")
+        self.assertNotIn("x-trace-id", headers)
+        context = opening.call_args.kwargs["context"]
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+
+    def test_deepseek_defaults_to_enabled_thinking_and_configured_token_limit(self):
+        client = llm_client.LLMClient(make_deepseek_config(thinking=None), retries=1)
+        with patch("llm_client.urllib.request.urlopen", return_value=completion()) as opening:
+            client.chat("instruction", "input")
+        body = json.loads(opening.call_args.args[0].data)
+        self.assertEqual(body["thinking"], {"type": "enabled"})
+        self.assertEqual(body["reasoning_effort"], "low")
+        self.assertEqual(body["max_tokens"], 8000)
+        self.assertNotIn("max_completion_tokens", body)
+        self.assertNotIn("temperature", body)
+
+    def test_deepseek_without_thinking_sends_temperature_and_omits_reasoning_effort(self):
+        client = llm_client.LLMClient(
+            make_deepseek_config(thinking={"type": "disabled"}), retries=1,
+        )
+        with patch("llm_client.urllib.request.urlopen", return_value=completion()) as opening:
+            client.chat("instruction", "input", temperature=0.4)
+        body = json.loads(opening.call_args.args[0].data)
+        self.assertEqual(body["thinking"], {"type": "disabled"})
+        self.assertEqual(body["temperature"], 0.4)
+        self.assertNotIn("reasoning_effort", body)
+
+    def test_deepseek_schema_uses_json_object_mode_and_embeds_schema_in_system_prompt(self):
+        client = llm_client.LLMClient(make_deepseek_config(), retries=1)
+        schema = {
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+            "additionalProperties": False,
+        }
+        with patch(
+            "llm_client.urllib.request.urlopen", return_value=completion('{"ok":true}'),
+        ) as opening:
+            parsed = client.chat_json("Return JSON.", "input", response_schema=schema)
+        self.assertEqual(parsed, {"ok": True})
+        body = json.loads(opening.call_args.args[0].data)
+        self.assertEqual(body["response_format"], {"type": "json_object"})
+        self.assertEqual(body["messages"][0]["role"], "system")
+        system_prompt = body["messages"][0]["content"]
+        self.assertIn("Return JSON.", system_prompt)
+        embedded_schema, _ = json.JSONDecoder().raw_decode(system_prompt[system_prompt.index("{"):])
+        self.assertEqual(embedded_schema, schema)
+
+    def test_deepseek_schema_allows_one_json_repair(self):
+        schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
+        for second_reply in ('{"ok":true}', "still not json"):
+            with self.subTest(second_reply=second_reply):
+                client = llm_client.LLMClient(make_deepseek_config(), retries=1)
+                with patch(
+                    "llm_client.urllib.request.urlopen",
+                    side_effect=[completion("not json"), completion(second_reply)],
+                ) as opening:
+                    if second_reply.startswith("{"):
+                        self.assertEqual(
+                            client.chat_json("Return JSON.", "input", response_schema=schema),
+                            {"ok": True},
+                        )
+                    else:
+                        with self.assertRaisesRegex(ValueError, "JSON object"):
+                            client.chat_json("Return JSON.", "input", response_schema=schema)
+                self.assertEqual(opening.call_count, 2)
+                repaired_request = json.loads(opening.call_args_list[1].args[0].data)
+                self.assertEqual(repaired_request["response_format"], {"type": "json_object"})
+                self.assertIn("previous reply was invalid",
+                              repaired_request["messages"][1]["content"].lower())
+
     def test_nonpositive_completion_limit_is_rejected_before_network(self):
         client = llm_client.LLMClient(make_config(), retries=1)
         with patch("llm_client.urllib.request.urlopen") as opening:

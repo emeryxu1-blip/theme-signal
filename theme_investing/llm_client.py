@@ -1,4 +1,4 @@
-"""OpenAI-compatible LiteLLM gateway client for the agent workflow."""
+"""DeepSeek and OpenAI-compatible gateway client for the agent workflow."""
 
 from __future__ import annotations
 
@@ -136,16 +136,25 @@ class LLMClient:
             self.cfg.reasoning_effort
             if reasoning_effort is None else reasoning_effort
         )
+        is_deepseek = self.cfg.provider == "deepseek"
         body = {
             "model": self.cfg.model,
             "stream": False,
-            "max_completion_tokens": completion_limit,
+            "max_tokens" if is_deepseek else "max_completion_tokens": completion_limit,
             "messages": [
-                {"role": "developer", "content": system},
+                {"role": "system" if is_deepseek else "developer", "content": system},
                 {"role": "user", "content": user},
             ],
         }
-        if effort:
+        if is_deepseek:
+            thinking = self.cfg.thinking or {"type": "enabled"}
+            body["thinking"] = thinking
+            if thinking.get("type") == "disabled" or effort == "none":
+                body["thinking"] = {"type": "disabled"}
+                body["temperature"] = temperature
+            elif effort:
+                body["reasoning_effort"] = effort
+        elif effort:
             body["reasoning_effort"] = effort
         else:
             # Current reasoning models do not consistently support sampling
@@ -155,14 +164,24 @@ class LLMClient:
         if response_schema is not None:
             if not isinstance(response_schema, dict):
                 raise ValueError("response schema must be a JSON object")
-            body["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": schema_name,
-                    "strict": True,
-                    "schema": response_schema,
-                },
-            }
+            if is_deepseek:
+                # DeepSeek supports JSON object output, not OpenAI's strict
+                # JSON schema response format. Keep the desired shape in the
+                # instruction; workflow validators still check each result.
+                body["response_format"] = {"type": "json_object"}
+                body["messages"][0]["content"] += (
+                    "\nReturn only a JSON object conforming to this JSON schema:\n"
+                    + json.dumps(response_schema, ensure_ascii=False)
+                )
+            else:
+                body["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": schema_name,
+                        "strict": True,
+                        "schema": response_schema,
+                    },
+                }
         elif json_mode:
             body["response_format"] = {"type": "json_object"}
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -230,7 +249,8 @@ class LLMClient:
         if "json" not in f"{system}\n{user}".lower():
             sys_json += "\nReturn only valid JSON, with no Markdown fences."
         last_error: Exception | None = None
-        parse_attempts = 1 if response_schema is not None else 2
+        strict_schema = response_schema is not None and self.cfg.provider != "deepseek"
+        parse_attempts = 1 if strict_schema else 2
         for attempt in range(parse_attempts):
             raw = self.chat(
                 sys_json,

@@ -10,22 +10,22 @@ This repository contains the theme-investing workflow and command-line interface
 
 The CLI uses the API keys and endpoints configured in `Skills/env.json`. Do not commit
 new API keys or publish existing keys outside the intended repository.
-The default local target uses the Office-WiFi LiteLLM gateway with `gpt-5.6-sol`.
+The default local target uses the official [DeepSeek API](https://api-docs.deepseek.com/)
+with `deepseek-flash`. Set `DEEPSEEK_API_KEY` in the environment, or save the key in
+`llm_profiles.local.api_key` in the gitignored `Skills/env.json`; the environment value
+takes precedence. The example configuration retains the Office-WiFi gateway as the
+optional `office_wifi` LLM profile.
 
-### AInvest C-side login and session refresh
+### AInvest C-side manual session
 
 Copy `Skills/env.example.json` to the gitignored `Skills/env.json` and set the
-active local quote profile's `auth.login.email`, `auth.login.password`, and
-`auth.login.auto_login` values locally. Automatic C-side login uses these credentials to
-refresh the C-side quote session. On successful login it overwrites `sessionid` and `userid`
-in both the active local quote profile and legacy root fields in `Skills/env.json`; those refreshed values and the
-credentials remain local and must never be committed. A CAPTCHA response requires completing
-the normal interactive verification before retrying. Do not put credentials, cookies, or
-session IDs in command lines, tests, logs, or documentation.
+active local quote profile's `sessionid` and `userid` values from an authenticated browser
+session. The application always uses these saved values and never performs an account login or
+session refresh. Keep the values local and update them manually when the website session expires.
+Do not put cookies or session IDs in command lines, tests, logs, or documentation.
 
-For quote-request inspection, use `--dry-run`. It performs no login and sends no network
-request. An explicit `--auth-value` Cookie takes precedence over the saved session for that
-one invocation.
+For quote-request inspection, use `--dry-run`; it sends no network request. An explicit
+`--auth-value` Cookie takes precedence over the saved session for that one invocation.
 
 ## Quick start
 
@@ -80,7 +80,8 @@ The output includes the LLM-translated `theme_cn` plus `ThemeStocks`, `ThemeEtfs
 liquid-stock quote universe; a fixed 120-name semantic set combines 40 broad-liquidity names
 with term-balanced theme-industry lanes, retaining several pure plays per explicit pathway and
 sampling equal taxonomy matches independently of market-cap order. Causal relevance determines
-membership and market cap only breaks exact final evidence ties. ETF selection is stock-led for
+ranking; progressively weaker relationship, ecosystem, sector, and broad-universe tiers backfill
+the exact stock count, with deterministic issuer/code tie-breakers. ETF selection is stock-led for
 every theme: the published stocks are probed for exact, direction-aligned >1× through 3×
 single-stock products, and up to 30 causally qualified stocks provide evidence for conventional
 1× equity baskets. Leveraged products are prioritized, not used as an exclusive ETF universe.
@@ -102,9 +103,11 @@ Conventional baskets can represent upside exposure in bullish runs or vulnerable
 exposure in bearish runs. After economic deduplication, the highest-ranked eligible leveraged
 wrapper is emitted first; when the target is at least two and an eligible conventional basket
 exists, the best basket receives a slot before the remaining unified-rank slots are filled.
-Leverage affects priority, not thematic evidence or public `Theme exposure`. ETNs, leveraged
-multi-stock baskets, weak or underspecified funds, and structurally ambiguous products remain
-excluded, so the result can contain fewer than five ETFs.
+Leverage affects priority, not thematic evidence or public `Theme exposure`. Strictly eligible
+funds rank first; theme-adjacent, live `CE`, and offline `CE` products provide progressively weaker
+fallback tiers so the default result still contains five unique ETFs. Inverse, leveraged,
+option-income, hedged, and alternative strategies may fill lower-ranked slots. Explicit ETNs and
+invalid or duplicate market codes remain excluded.
 
 ```bash
 # Top 100 stocks by market cap + at most 100 theme-derived ETF candidates
@@ -120,7 +123,7 @@ python3 cli.py --target local --input my_input.json --limit 1000 \
 If `--limit` is omitted, the CLI default is 2,000 stocks. Ordinary ETF discovery is hard-capped at
 500 candidates; exact single-stock product probes remain additive. Use
 `--etf-evidence-stock-limit` to change the internal basket-evidence stock limit from its default of
-30.
+30. Defaults are exact: eight unique stocks and five unique ETFs; zero disables either class.
 
 ### Overseas production mode
 
@@ -217,9 +220,9 @@ The result contains these top-level sections:
 
 ### `401 Authentication Error`
 
-Use `--target local` on Office Wi-Fi. It uses Bearer authentication against the
-OpenAI-compatible LiteLLM gateway and defaults to `gpt-5.6-sol`; Anthropic environment
-variables are not used by this route.
+For `--target local`, check the DeepSeek key in `DEEPSEEK_API_KEY` or
+`llm_profiles.local.api_key` in `Skills/env.json`. This route uses Bearer authentication
+against `https://api.deepseek.com/chat/completions` with `deepseek-flash`.
 
 ### `RemoteDisconnected` from the quote API
 

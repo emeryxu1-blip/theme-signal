@@ -421,11 +421,11 @@ python3 scripts/fetch_quote.py --scene c --template stock-detail.json --pretty
 
 - `sandbox` 默认读取 `AIME_API_KEY`。
 - 默认读取 `../env.json` 中的 `active_scene`、B 端 apikey、C 端 cookie 字段、scene endpoint 和公共 header；可用 `--no-env-file` 禁用。
-- 自动 C 端登录只从 gitignored 的 `Skills/env.json` 读取本地账户凭证；登录成功后会覆盖该文件中的 `sessionid` 和 `userid`。凭证和刷新后的会话值均不得提交。
+- C 端只使用 gitignored 的 `Skills/env.json` 中手动保存的 `cookie` 或 `sessionid` / `userid`；脚本不会登录、刷新或改写这些值。会话值不得提交。
 - `b` 仍可通过 `--index-api-apikey`、`--quoteag-apikey` 或 `--auth-value` 覆盖配置文件中的 apikey。
 - `c` 仍可通过 `--auth-value` 覆盖配置文件中由 `sessionid` / `userid` 组成的 Cookie；显式值只作用于当前命令，并优先于保存的会话。
-- `--dry-run` 只输出脱敏后的请求，不发送请求，也不触发自动登录。
-- 不要把真实 Cookie、账户凭证或 apikey 写入仓库文档、模板或生成文件。
+- `--dry-run` 只输出脱敏后的请求，不发送请求。
+- 不要把真实 Cookie 或 apikey 写入仓库文档、模板或生成文件。
 - 默认公共 header 为 `Content-Type: application/json`、`Accept-Language: en` 和 `X-Auth-ProgId: 7080`。
 - `--endpoint` 可显式指定；不指定时脚本根据模板名和 body 结构推断。
 
