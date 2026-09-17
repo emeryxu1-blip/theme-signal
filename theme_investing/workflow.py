@@ -4707,16 +4707,12 @@ class ThemeWorkflow:
             c.update(feats)
 
     def _assign_theme_exposure(self, chosen: list[dict]) -> None:
-        """Calibrate headline exposure without disturbing approved ETF selection."""
-        is_etf_output = bool(chosen) and all(
-            candidate.get("static_theme_exposure") is not None
-            for candidate in chosen
-        )
+        """Assign the same 5.0-to-3.0 rank ladder to frozen stocks and ETFs."""
         for c in chosen:
             market_strength = _clamp_float(
                 c.get("market_strength"), 0.0, 1.0, default=0.0)
             if c.get("static_theme_exposure") is not None:
-                # ETF exposure is factual holdings/pool arithmetic from
+                # Raw ETF exposure is factual holdings/pool arithmetic from
                 # etf_preselection.py; do not replace it with an LLM-derived score.
                 base_exposure = _clamp_float(
                     c["static_theme_exposure"], 0.0, 1.0, default=0.0)
@@ -4730,41 +4726,22 @@ class ThemeWorkflow:
                         default=_semantic_score(c),
                     ),
                 )
-                # Public stock exposure is the grounded relationship score.
+                # Raw stock exposure is the grounded relationship score.
                 # Price and volume remain private diagnostics and cannot inflate
                 # the public label.
                 c["theme_exposure_raw"] = semantic
-        # Stock labels communicate the already-frozen broker rank, not a second
-        # eligibility judgment.  Keep the first member at 5.0 and distribute the
-        # remainder evenly through 3.0 without consulting price/volume features.
-        if not is_etf_output:
-            count = len(chosen)
-            for index, candidate in enumerate(chosen):
-                score = (
-                    5.0
-                    if count <= 1
-                    else round(5.0 - 2.0 * index / (count - 1), 1)
-                )
-                candidate["theme_exposure"] = score
-                candidate["score"] = score
-            return
-
-        # ETF membership and order are fixed before market data is fetched.
-        # Calibrate labels on a sorted copy, then map them back without reordering
-        # the approved ETF composition.
-        exposure_order = sorted(
-            range(len(chosen)),
-            key=lambda index: (
-                -chosen[index]["theme_exposure_raw"],
-                str(chosen[index].get("code") or ""),
-            ),
-        )
-        display = scoring.calibrate_scores([
-            chosen[index]["theme_exposure_raw"] for index in exposure_order
-        ])
-        for index, score in zip(exposure_order, display):
-            chosen[index]["theme_exposure"] = score
-            chosen[index]["score"] = score
+        # Public labels communicate the already-frozen selection rank for both
+        # asset classes. Raw evidence and market diagnostics stay internal and
+        # cannot change the order or the evenly distributed display scores.
+        count = len(chosen)
+        for index, candidate in enumerate(chosen):
+            score = (
+                5.0
+                if count <= 1
+                else round(5.0 - 2.0 * index / (count - 1), 1)
+            )
+            candidate["theme_exposure"] = score
+            candidate["score"] = score
 
     @staticmethod
     def _validated_rationale_text(value) -> str | None:

@@ -1,5 +1,7 @@
 """Focused tests for exact-count ETF output selection."""
 
+import copy
+import itertools
 import os
 import sys
 
@@ -10,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from etf_preselection import (  # noqa: E402
     MULTI_STOCK_BASKET_LANE,
+    SINGLE_STOCK_LEVERAGED_LANE,
     compose_output_etfs,
     select_output_etfs,
 )
@@ -188,3 +191,193 @@ def test_structured_etn_type_variants_are_excluded(etn_type):
 
     assert select_output_etfs([note]) == []
     assert note["selection_basis"] == "explicit_etn_excluded"
+
+
+@pytest.mark.parametrize(("evidence", "preferred"), [
+    pytest.param({}, False, id="missing"),
+    pytest.param({"static_theme_exposure": None}, False, id="null"),
+    pytest.param({"static_theme_exposure": float("nan")}, False, id="nan"),
+    pytest.param({"static_theme_exposure": float("inf")}, False, id="infinity"),
+    pytest.param({"static_theme_exposure": -float("inf")}, False, id="negative-infinity"),
+    pytest.param({"static_theme_exposure": "unavailable"}, False, id="invalid"),
+    pytest.param({"static_theme_exposure": 0.374999}, False, id="below-threshold"),
+    pytest.param({"static_theme_exposure": 0.375}, True, id="at-threshold"),
+    pytest.param({"static_theme_exposure": 0.375001}, True, id="above-threshold"),
+])
+def test_evidence_preference_requires_current_finite_static_exposure(evidence, preferred):
+    anchor = _candidate(
+        "185:ANCHOR", eligible=True, score=0.10, static_theme_exposure=0.375,
+    )
+    provisional_leader = _candidate(
+        "185:PROVISIONAL", eligible=True, score=0.99,
+        base_theme_exposure=1.0, ai_relevance=5.0, preselect_score=1.0,
+        **evidence,
+    )
+
+    selected = compose_output_etfs([provisional_leader, anchor], 1)
+
+    assert selected == [provisional_leader if preferred else anchor]
+
+
+def test_static_evidence_cannot_qualify_an_ineligible_ce_fallback():
+    eligible = _candidate(
+        "185:QUALIFIED", eligible=True, score=0.10, static_theme_exposure=0.375,
+    )
+    ineligible = _candidate(
+        "185:INELIGIBLE", eligible=False, score=0.99, static_theme_exposure=0.99,
+    )
+
+    assert compose_output_etfs([ineligible, eligible], 1) == [eligible]
+
+
+def test_evidence_preference_precedes_market_code_deduplication():
+    qualified = _candidate(
+        "185:DUP", eligible=True, score=0.10, static_theme_exposure=0.375,
+    )
+    weak = _candidate(
+        "185:dup", eligible=True, score=0.99, static_theme_exposure=0.374999,
+    )
+
+    assert select_output_etfs([weak, qualified]) == [qualified]
+    assert weak["dedupe_reason"] == "duplicate_market_code"
+    assert weak["dedupe_excluded"] is True
+
+
+def test_evidence_preference_precedes_economic_overlap_classification():
+    holdings = [("185:A", "Alpha", 95), ("185:B", "Beta", 5)]
+    qualified = _basket(
+        "185:QUALIFIED", eligible=True, score=0.10,
+        static_theme_exposure=0.375, holdings=holdings,
+    )
+    weak = _basket(
+        "185:WEAK", eligible=True, score=0.99,
+        static_theme_exposure=0.10, holdings=holdings,
+    )
+
+    assert select_output_etfs([weak, qualified]) == [qualified, weak]
+    assert qualified["overlap_relaxed"] is False
+    assert weak["overlap_relaxed"] is True
+    assert weak["dedupe_reason"] == "weighted_portfolio_overlap"
+
+
+def test_qualified_overlap_reserve_precedes_all_weak_diverse_rows():
+    leader = _basket(
+        "185:LEADER", eligible=True, score=0.90,
+        static_theme_exposure=0.60,
+        holdings=[("185:A", "Alpha", 95), ("185:B", "Beta", 5)],
+    )
+    overlap = _basket(
+        "185:OVERLAP", eligible=True, score=0.80,
+        static_theme_exposure=0.50,
+        holdings=[("185:A", "Alpha", 96), ("185:B", "Beta", 4)],
+    )
+    weak_eligible = _basket(
+        "185:WEAK", eligible=True, score=0.99,
+        static_theme_exposure=0.20,
+        holdings=[("185:C", "Gamma", 60), ("185:D", "Delta", 40)],
+    )
+    fallback = _candidate("185:FALLBACK", score=0.70)
+    pool = select_output_etfs([fallback, weak_eligible, overlap, leader])
+
+    assert pool == [leader, overlap, weak_eligible, fallback]
+    assert compose_output_etfs(pool, 2) == [leader, overlap]
+    assert overlap["overlap_relaxed"] is True
+    assert overlap["dedupe_excluded"] is False
+
+
+@pytest.mark.parametrize("weak_lane", [
+    SINGLE_STOCK_LEVERAGED_LANE, MULTI_STOCK_BASKET_LANE,
+])
+def test_weak_lane_reservation_cannot_displace_qualified_products(weak_lane):
+    strong = [
+        _candidate(
+            f"185:STRONG{index}", eligible=True, score=0.8 - index * 0.1,
+            static_theme_exposure=0.375, selection_lane="direct_asset",
+        )
+        for index in range(2)
+    ]
+    weak = _candidate(
+        "185:WEAK", eligible=True, score=0.99,
+        static_theme_exposure=0.10, selection_lane=weak_lane,
+        underlying_code="185:UNDERLYING",
+    )
+
+    assert compose_output_etfs([weak, *strong], 1) == strong[:1]
+    assert compose_output_etfs([weak, *strong], 2) == strong
+
+
+@pytest.mark.parametrize("static_exposure", [0.20, 0.375])
+def test_wrapper_and_basket_reservations_remain_within_each_evidence_band(static_exposure):
+    def product(code, score, lane):
+        return _candidate(
+            code, eligible=True, score=score,
+            static_theme_exposure=static_exposure, selection_lane=lane,
+        )
+
+    leader = product("185:LEADER", 0.95, "direct_asset")
+    runner_up = product("185:RUNNERUP", 0.90, "direct_asset")
+    wrapper = product("185:WRAPPER", 0.30, SINGLE_STOCK_LEVERAGED_LANE)
+    basket = product("185:BASKET", 0.20, MULTI_STOCK_BASKET_LANE)
+    pool = [runner_up, basket, leader, wrapper]
+
+    assert compose_output_etfs(pool, 1) == [wrapper]
+    assert compose_output_etfs(pool, 2) == [wrapper, basket]
+    assert compose_output_etfs(pool, 3) == [wrapper, leader, basket]
+    assert compose_output_etfs(pool, 4) == [wrapper, leader, runner_up, basket]
+
+
+def test_each_evidence_band_composes_only_its_remaining_capacity():
+    strong_direct = _candidate(
+        "185:STRONG", eligible=True, score=0.90,
+        static_theme_exposure=0.50, selection_lane="direct_asset",
+    )
+    strong_basket = _candidate(
+        "185:STRONGBASKET", eligible=True, score=0.10,
+        static_theme_exposure=0.375, selection_lane=MULTI_STOCK_BASKET_LANE,
+    )
+    weak_direct = _candidate(
+        "185:WEAKDIRECT", eligible=True, score=0.99,
+        static_theme_exposure=0.10, selection_lane="direct_asset",
+    )
+    weak_wrapper = _candidate(
+        "185:WEAKWRAPPER", eligible=True, score=0.90,
+        static_theme_exposure=0.10, selection_lane=SINGLE_STOCK_LEVERAGED_LANE,
+    )
+    weak_basket = _candidate(
+        "185:WEAKBASKET", eligible=True, score=0.10,
+        static_theme_exposure=0.10, selection_lane=MULTI_STOCK_BASKET_LANE,
+    )
+    pool = [weak_direct, weak_wrapper, strong_direct, weak_basket, strong_basket]
+
+    assert compose_output_etfs(pool, 3) == [
+        strong_direct, strong_basket, weak_wrapper,
+    ]
+    assert compose_output_etfs(pool, 4) == [
+        strong_direct, strong_basket, weak_wrapper, weak_basket,
+    ]
+    assert compose_output_etfs(pool, 5) == [
+        strong_direct, strong_basket, weak_wrapper, weak_direct, weak_basket,
+    ]
+
+
+def test_direct_and_select_then_compose_are_deterministic_for_custom_targets():
+    candidates = [
+        _candidate("185:WEAK", eligible=True, score=0.99, static_theme_exposure=0.20),
+        _candidate("185:STRONG", eligible=True, score=0.10, static_theme_exposure=0.375),
+        _candidate("185:FALLBACK", score=0.80),
+    ]
+    expected = ["185:STRONG", "185:WEAK", "185:FALLBACK"]
+
+    for permutation in itertools.permutations(candidates):
+        for target in (0, 1, 2, 3, 7):
+            direct = compose_output_etfs(copy.deepcopy(list(permutation)), target)
+            selected = compose_output_etfs(
+                select_output_etfs(copy.deepcopy(list(permutation))), target,
+            )
+            assert [row["code"] for row in direct] == expected[:target]
+            assert selected == direct
+
+    assert select_output_etfs(copy.deepcopy(candidates), limit=0) == []
+    assert [row["code"] for row in select_output_etfs(
+        copy.deepcopy(candidates), limit=2,
+    )] == expected[:2]

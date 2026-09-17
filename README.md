@@ -100,14 +100,20 @@ only when a conservative lower bound that counts unresolved holdings as zero sti
 marked in diagnostics and does not change the public JSON schema.
 
 Conventional baskets can represent upside exposure in bullish runs or vulnerable-company downside
-exposure in bearish runs. After economic deduplication, the highest-ranked eligible leveraged
-wrapper is emitted first; when the target is at least two and an eligible conventional basket
-exists, the best basket receives a slot before the remaining unified-rank slots are filled.
-Leverage affects priority, not thematic evidence or public `Theme exposure`. Strictly eligible
-funds rank first; theme-adjacent, live `CE`, and offline `CE` products provide progressively weaker
-fallback tiers so the default result still contains five unique ETFs. Inverse, leveraged,
-option-income, hedged, and alternative strategies may fill lower-ranked slots. Explicit ETNs and
-invalid or duplicate market codes remain excluded.
+exposure in bearish runs. Before economic deduplication, ETFs with `output_eligible` true and
+finite, authoritative `static_theme_exposure >= 0.375` receive preference, independently of
+public display scores. Missing evidence or stale provisional scores cannot
+establish that preference. These funds, including permitted economic overlaps, fill slots before
+weaker candidates. Within each group, composition prioritizes the highest-ranked eligible
+leveraged wrapper and reserves a conventional-basket slot when the target allows it, preserving
+the existing ranking for remaining slots. A weaker wrapper or basket cannot displace a preferred
+fund. Theme-adjacent, live `CE`, and offline `CE` fallback tiers still fill the exact target,
+including five unique ETFs by default. Inverse, leveraged, option-income, hedged, and alternative
+strategies may fill lower-ranked slots. Explicit ETNs and invalid or duplicate market codes remain
+excluded. ETFs use the same public `Theme exposure` rank ladder as stocks, evenly distributed
+from 5.0 to 3.0 in frozen selection order and rounded to one decimal. Five ETFs receive
+`5.0, 4.5, 4.0, 3.5, 3.0`; a singleton receives 5.0. Internal evidence, ETF selection, stock
+behavior, and the public JSON schema remain unchanged.
 
 ```bash
 # Top 100 stocks by market cap + at most 100 theme-derived ETF candidates

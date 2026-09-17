@@ -169,6 +169,108 @@ def test_etf_market_strength_uplift_is_continuous_and_bounded():
     assert partial["theme_exposure_raw"] == 0.525
     assert full["theme_exposure_raw"] == 0.55
     assert full["theme_exposure_raw"] <= 1.10 * unconfirmed["theme_exposure_raw"]
+    assert [candidate["theme_exposure"] for candidate in (unconfirmed, partial, full)] == [
+        5.0, 4.0, 3.0,
+    ]
+
+
+def test_etf_rank_ladder_preserves_raw_evidence_and_frozen_order():
+    wf = ThemeWorkflow(FakeLLM(), FakeQuotes())
+    raw_scores = [0.8, 0.0, 0.375, 0.25, 1.0, 0.3749, 0.5]
+    chosen = [
+        {"code": f"185:ETF{index}", "static_theme_exposure": evidence}
+        for index, evidence in enumerate(raw_scores)
+    ]
+    frozen_codes = [candidate["code"] for candidate in chosen]
+
+    wf._assign_theme_exposure(chosen)
+
+    assert [candidate["theme_exposure"] for candidate in chosen] == [
+        5.0, 4.7, 4.3, 4.0, 3.7, 3.3, 3.0,
+    ]
+    assert [candidate["score"] for candidate in chosen] == [
+        candidate["theme_exposure"] for candidate in chosen
+    ]
+    assert [candidate["static_theme_exposure"] for candidate in chosen] == raw_scores
+    assert [candidate["theme_exposure_raw"] for candidate in chosen] == raw_scores
+    assert [candidate["code"] for candidate in chosen] == frozen_codes
+
+
+def test_etf_rank_ladder_is_independent_of_equal_weak_or_missing_evidence():
+    wf = ThemeWorkflow(FakeLLM(), FakeQuotes())
+    for evidence in (0.0, 0.8, None):
+        chosen = [
+            {"code": f"185:ETF{index}", "security_class": "CE"}
+            for index in range(5)
+        ]
+        if evidence is not None:
+            for candidate in chosen:
+                candidate["static_theme_exposure"] = evidence
+        frozen_codes = [candidate["code"] for candidate in chosen]
+
+        wf._assign_theme_exposure(chosen)
+
+        assert [candidate["theme_exposure"] for candidate in chosen] == [
+            5.0, 4.5, 4.0, 3.5, 3.0,
+        ]
+        assert [candidate["score"] for candidate in chosen] == [
+            5.0, 4.5, 4.0, 3.5, 3.0,
+        ]
+        assert [candidate["code"] for candidate in chosen] == frozen_codes
+        if evidence is not None:
+            assert all(candidate["static_theme_exposure"] == evidence
+                       and candidate["theme_exposure_raw"] == evidence
+                       for candidate in chosen)
+        else:
+            assert all("static_theme_exposure" not in candidate
+                       for candidate in chosen)
+
+
+def test_etf_rank_ladder_handles_empty_singleton_and_two_selected_funds():
+    wf = ThemeWorkflow(FakeLLM(), FakeQuotes())
+    empty = []
+    assert wf._assign_theme_exposure(empty) is None
+    assert empty == []
+
+    singleton = [{"code": "185:ONLY", "static_theme_exposure": 0.0}]
+    wf._assign_theme_exposure(singleton)
+    assert singleton[0]["theme_exposure"] == singleton[0]["score"] == 5.0
+    assert singleton[0]["theme_exposure_raw"] == 0.0
+
+    pair = [
+        {"code": "185:WEAK", "static_theme_exposure": 0.0},
+        {"code": "185:STRONG", "static_theme_exposure": 1.0},
+    ]
+    wf._assign_theme_exposure(pair)
+    assert [candidate["code"] for candidate in pair] == ["185:WEAK", "185:STRONG"]
+    assert [candidate["theme_exposure"] for candidate in pair] == [5.0, 3.0]
+    assert [candidate["theme_exposure_raw"] for candidate in pair] == [0.0, 1.0]
+
+
+def test_five_zero_evidence_etf_fallbacks_assemble_with_rank_ladder():
+    wf = ThemeWorkflow(FakeLLM(), FakeQuotes())
+    chosen = compose_output_etfs([
+        {
+            "code": f"185:FALLBACK{index}", "name": f"Fallback ETF {index}",
+            "security_class": "CE", "output_eligible": False,
+            "static_theme_exposure": 0.0,
+        }
+        for index in range(5)
+    ], 5)
+    frozen_codes = [candidate["code"] for candidate in chosen]
+
+    output = wf._assemble(chosen, {}, "2026-09-16")
+
+    assert len(output) == 5
+    assert [item["market_code"] for item in output] == frozen_codes
+    assert [item["Theme exposure"] for item in output] == [5.0, 4.5, 4.0, 3.5, 3.0]
+    assert all(set(item) == {
+        "market_code", "theme_rationale", "Theme exposure", "event_date",
+    } for item in output)
+    assert all(item["theme_rationale"]["en"] and item["theme_rationale"]["zh"]
+               for item in output)
+    assert all(candidate["static_theme_exposure"] == 0.0
+               and candidate["theme_exposure_raw"] == 0.0 for candidate in chosen)
 
 
 def test_validate_input_rejects_bad():
@@ -1679,12 +1781,12 @@ def test_end_to_end_mocked():
         codes = [x["market_code"] for x in res[coll]]
         assert len(codes) == len(set(codes))
         scores = [x["Theme exposure"] for x in res[coll]]
-        # Stock output remains semantic-score ordered. ETF composition may put a
-        # verified leveraged wrapper first without changing its public thematic
-        # exposure score, so ETF exposure labels need not be monotonic.
-        if coll == "ThemeStocks":
-            assert all(scores[i] >= scores[i + 1] for i in range(len(scores) - 1))
-        assert all(1.0 <= s <= 5.0 for s in scores)
+        # Both public ladders describe each class's already-frozen output order.
+        expected_scores = {
+            "ThemeStocks": [5.0, 4.7, 4.4, 4.1, 3.9, 3.6, 3.3, 3.0],
+            "ThemeEtfs": [5.0, 4.5, 4.0, 3.5, 3.0],
+        }
+        assert scores == expected_scores[coll]
         assert all("score" not in x and "score_components" not in x for x in res[coll])
         assert all("why_bullish" not in x for x in res[coll])
         assert all(set(x) == {"market_code", "theme_rationale", "Theme exposure", "event_date"}

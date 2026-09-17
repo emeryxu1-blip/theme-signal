@@ -34,8 +34,10 @@ LLM semantic analysis (official DeepSeek Flash API by default) with live market 
 stocks and five ETFs. Zero disables that asset class. FAQ count remains a bounded range.
 `theme_cn` is the theme-only LLM pass's faithful Simplified Chinese translation of the exact
 input `theme`.
-`Theme exposure` is the only exposed score (1–5). Public stocks receive a deterministic 5.0-to-3.0
-attractiveness ladder in their frozen order; price and volume cannot change that order. Basket-ETF exposure is
+`Theme exposure` is the only exposed score. Stocks and ETFs receive the same deterministic
+5.0-to-3.0 rank ladder in their frozen order, rounded to one decimal; price and volume cannot
+change that order or the public scores. Five ETFs receive `5.0, 4.5, 4.0, 3.5, 3.0`; a singleton
+receives 5.0. Internal basket-ETF evidence is
 calculated from independently scored full portfolios, relevant-issuer breadth, selected-stock
 coverage, and a small canonical-mandate term. Baskets require at least 60% reported
 holdings and normally at least 80% semantic coverage. Below 80%, a conservative partial-evidence
@@ -84,8 +86,10 @@ contract, catalyst, or financial-magnitude claims.
    both Consumer Staples and Consumer Discretionary discovery. Ordinary basket candidates have a
    hard 500-name cap; verified direct probes are additive. A live ETF-universe scan is used once
    to recover exact wrappers when stock-specific sources fail or return none, with the local CE
-   list as the final ETF screening fallback. Eligible products rank first, followed by
-   theme-adjacent discovered funds, broader live `CE` products, and the offline `CE` universe.
+   list as the final ETF screening fallback. Output-eligible products with authoritative static
+   exposure of at least 0.375 receive preference before deduplication, including permitted
+   economic overlaps, followed by weaker candidates in their existing order. Theme-adjacent
+   discovered funds, broader live `CE` products, and the offline `CE` universe fill any shortfall.
    ETF codes and order are then frozen, and both exact counts are asserted before narration.
 5. **Evidence lanes and exact ETF composition** — direction-aligned >1× through 3× exact
    single-stock products can qualify without physical holdings. Conventional 1× long baskets can
@@ -98,12 +102,14 @@ contract, catalyst, or financial-magnitude claims.
    as zero exposure—still clears the same score and issuer gates; this partial-evidence mode is
    explicitly logged. A free-form mandate mismatch cannot block holdings assessment; canonical
    mandate alignment is only a 5% corroborating signal. Direct-asset products still require
-   explicit canonical mandate evidence. Strictly eligible products remain preferred. If needed for
-   the exact target, lower tiers may include inverse, leveraged, option-income, buffered, hedged,
+   explicit canonical mandate evidence. Within each exposure-preference group, composition
+   prioritizes an eligible leveraged wrapper and reserves a conventional-basket slot when the
+   target allows it; weaker products cannot displace preferred funds. If needed for the exact
+   target, lower tiers may include inverse, leveraged, option-income, buffered, hedged,
    long-short, alternative-strategy, or economically overlapping `CE` products. Explicit ETNs,
    invalid market codes, and duplicate codes remain excluded. Known daily-reset products are
    narrated with a concise compounding/path-dependence disclosure.
-6. **Market features (finalists only)** — daily K-lines are fetched **only for the already-qualified finalists**. Signed change and abnormal return remain available internally. ETF labels may use a small, direction-neutral uplift based on a tie-aware percentile of `|Chg %|` plus RVOL confirmation; public-stock labels remain relationship-only. Equal positive and negative moves contribute equally, and price action never establishes thematic exposure. These values are not passed to the narrative prompt.
+6. **Market features (finalists only)** — daily K-lines are fetched **only for the already-qualified finalists**. Signed change and abnormal return remain available internally. Raw ETF diagnostics retain a small, direction-neutral uplift based on a tie-aware percentile of `|Chg %|` plus RVOL confirmation. Public stock and ETF labels use only their frozen selection rank. Equal positive and negative moves contribute equally to diagnostics, and price action never establishes thematic exposure. These values are not passed to the narrative prompt.
 7. **Independent narration + FAQ** — only after both baskets are frozen does narration begin.
    Each missing, malformed, mismatched, unsafe, or duplicated row gets one same-code retry and then
    deterministic bilingual fallback prose; narration never substitutes a security, changes order,
@@ -131,12 +137,19 @@ quality-weighted selected-stock coverage + 5% × canonical mandate corroboration
 products use their underlying selected stock's causal quality; direct assets retain explicit
 canonical mandate/pool evidence. Investability is `50% × turnover percentile + 35% × AUM
 percentile + 15% × inverse expense-ratio percentile`, with missing metrics scoring zero. Final ETF
-rank is `80% × theme evidence + 10% × investability + 10% × exact-selected-stock bonus`; the
-post-deduplication composition rule then makes leverage first and reserves a basket slot when
-eligible and the target is at least two. Leverage does not increase thematic evidence. AUM below
-$25 million or current turnover below $1 million is a soft warning and ranking disadvantage, not
-an exclusion. Public `Theme exposure` remains based on thematic evidence rather than investability
-or leverage, and the `ThemeEtfs` JSON shape is unchanged.
+rank within each preference group is `80% × theme evidence + 10% × investability + 10% ×
+exact-selected-stock bonus`. The preferred group requires `output_eligible` true and finite,
+authoritative `static_theme_exposure >= 0.375`, independently of public display scores;
+missing evidence or stale provisional scores cannot establish preference. This group takes
+precedence before deduplication, and its permitted overlapping funds precede weaker fillers.
+Post-deduplication wrapper/basket reservations operate within each group, so a weaker product
+cannot displace a preferred ETF. Leverage does not increase thematic evidence. AUM below
+$25 million or current turnover below $1 million is a soft warning and ranking disadvantage,
+not an exclusion. Both asset classes receive public `Theme exposure` of
+`round(5.0 - 2.0 * index / (count - 1), 1)` in frozen selection order, with zero-based `index`;
+a singleton receives 5.0 and an empty list remains empty. ETF fallback funds participate in the
+same ladder while retaining their original internal evidence. ETF selection, stock behavior,
+and the `ThemeEtfs` JSON shape remain unchanged.
 
 ## Run
 From the repository root, enter the workflow directory first:

@@ -776,6 +776,9 @@ MULTI_STOCK_BASKET_LANE = "multi_stock_basket"
 DIRECT_ASSET_LANE = "direct_asset"
 INELIGIBLE_LANE = "ineligible"
 
+# Selection preference is independent of the public rank-based display score.
+ETF_PREFERRED_EVIDENCE_MIN = 0.375
+
 _LOW_LIQUIDITY_AUM = 25_000_000.0
 _LOW_LIQUIDITY_TURNOVER = 1_000_000.0
 _GENERIC_RELATED_SCAN_MAX = 100
@@ -2424,6 +2427,16 @@ def _economic_overlap_reason(
     return None
 
 
+def _meets_etf_exposure_preference(candidate: dict) -> bool:
+    """Prefer verified evidence, never provisional scores or public rank labels."""
+    evidence = _finite_float(candidate.get("static_theme_exposure"))
+    return bool(
+        candidate.get("output_eligible")
+        and evidence is not None
+        and evidence >= ETF_PREFERRED_EVIDENCE_MIN
+    )
+
+
 def select_output_etfs(
     candidates: list[dict],
     limit: int | None = None,
@@ -2432,12 +2445,14 @@ def select_output_etfs(
 ) -> list[dict]:
     """Build the deterministic output pool, including bounded CE reserves.
 
-    Currently eligible products are preferred to weak or newly discovered rows.
+    Eligible products with authoritative evidence of at least 0.375 are
+    preferred, including permitted economic-overlap reserves.
+    Remaining products retain their existing eligibility and diversity order.
     A non-eligible reserve must be explicitly identified as ``security_class=CE``;
     explicit exchange-traded notes are always excluded. Duplicate market codes
-    are also a hard exclusion. Economic duplicates are placed after every
-    diverse eligible and CE-reserve row so :func:`compose_output_etfs` can relax
-    overlap only when doing so is necessary to satisfy the requested count.
+    are also a hard exclusion. Within each evidence band, economic duplicates
+    follow diverse rows so :func:`compose_output_etfs` relaxes overlap only
+    after the band's diverse candidates are exhausted.
 
     Legacy hand-built candidates without explicit CE metadata retain the old
     hard economic-dedupe behavior. This preserves compatibility while ensuring
@@ -2491,7 +2506,12 @@ def select_output_etfs(
             "selection_basis": "not_eligible_or_explicit_ce",
         })
 
-    eligible.sort(key=_ranking_key)
+    # Choose the stronger evidence row before code or economic deduplication
+    # can let a higher-ranked but weaker row consume its place.
+    eligible.sort(key=lambda candidate: (
+        not _meets_etf_exposure_preference(candidate),
+        *_ranking_key(candidate),
+    ))
     ce_fallback.sort(key=_fallback_ranking_key)
 
     diverse: dict[str, list[dict]] = {
@@ -2557,6 +2577,11 @@ def select_output_etfs(
         *overlapping["eligible"],
         *overlapping["ce_fallback"],
     ]
+    # Stable partition: supported overlap reserves precede weak diverse funds,
+    # while the established ranking inside each evidence band is preserved.
+    selected.sort(
+        key=lambda candidate: not _meets_etf_exposure_preference(candidate),
+    )
     if limit is not None:
         return selected[:limit]
     return selected
@@ -2567,12 +2592,11 @@ def compose_output_etfs(
 ) -> list[dict]:
     """Compose exactly ``target`` ETFs whenever the supplied pool permits it.
 
-    Eligible, economically diverse products remain preferred. Explicit-CE
-    fallback products are considered next, and economic-overlap reserves are
-    reached only after all diverse rows. The historical best-wrapper and
-    conventional-basket reservations remain in force inside that preferred
-    set. A genuinely exhausted input pool returns short so the workflow can
-    attempt live/offline CE expansion before deciding whether to fail.
+    Eligible evidence of at least 0.375 takes priority over weaker rows.
+    The historical best-wrapper and conventional-basket reservations
+    apply inside each evidence band, so a weaker reservation cannot displace
+    stronger evidence. A genuinely exhausted input pool returns short so the
+    workflow can attempt live/offline CE expansion before deciding whether to fail.
     """
     if target < 0:
         raise ValueError("ETF output target cannot be negative")
@@ -2585,6 +2609,20 @@ def compose_output_etfs(
     if not pool:
         return []
 
+    strong = [
+        candidate for candidate in pool if _meets_etf_exposure_preference(candidate)
+    ]
+    weaker = [
+        candidate for candidate in pool if not _meets_etf_exposure_preference(candidate)
+    ]
+    selected = _compose_etf_band(strong, target)
+    if len(selected) < target:
+        selected.extend(_compose_etf_band(weaker, target - len(selected)))
+    return selected
+
+
+def _compose_etf_band(pool: list[dict], target: int) -> list[dict]:
+    """Apply product reservations within one already-deduplicated evidence band."""
     preferred = [
         candidate for candidate in pool
         if not candidate.get("overlap_relaxed")
