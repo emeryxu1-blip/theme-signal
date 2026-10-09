@@ -29,6 +29,10 @@ class LLMConfig:
     max_completion_tokens: int = 8000
     verify_tls: bool = True
     ca_file: str | None = None
+    auto_select_model: bool = False
+    workflow_retries: int | None = None
+    probe_timeout_seconds: float = 60.0
+    model_priority: tuple[str, ...] = ()
 
 
 @dataclass
@@ -102,7 +106,7 @@ def selected_quote_profile(env: dict) -> tuple[str, dict]:
 
 def load_llm_config(env: dict | None = None) -> LLMConfig:
     env = _load_env() if env is None else env
-    _, profile = selected_llm_profile(env)
+    profile_name, profile = selected_llm_profile(env)
     provider = profile.get("provider", "litellm_openai_compatible")
     if provider == "anthropic":
         base = profile.get("base_url", "https://api.anthropic.com").rstrip("/")
@@ -122,6 +126,7 @@ def load_llm_config(env: dict | None = None) -> LLMConfig:
             max_completion_tokens=int(profile.get("max_completion_tokens", 8000)),
             verify_tls=bool(profile.get("verify_tls", True)),
             ca_file=profile.get("ca_file"),
+            **_model_selection_options(profile),
         )
 
     environments = profile.get("environments")
@@ -146,7 +151,11 @@ def load_llm_config(env: dict | None = None) -> LLMConfig:
         if not base_url:
             raise ValueError("selected LLM profile has no base_url")
         base = str(base_url).rstrip("/")
-    protocols = profile.get("protocols", {})
+    selection_options = _model_selection_options(profile, selected_environment)
+    protocols = {
+        **(profile.get("protocols") or {}),
+        **(selected_environment.get("protocols") or {}),
+    }
     request = {
         **(profile.get("request") or profile.get("auth") or {}),
         **(selected_environment.get("request") or {}),
@@ -154,6 +163,8 @@ def load_llm_config(env: dict | None = None) -> LLMConfig:
     api_key = selected_environment.get("api_key", profile.get("api_key", ""))
     if provider == "deepseek":
         api_key = os.environ.get("DEEPSEEK_API_KEY") or api_key
+    elif selection_options["auto_select_model"] and profile_name in {"local", "office_wifi"}:
+        api_key = os.environ.get("OFFICE_API_KEY") or api_key
     completion_path = protocols.get(
         "chat_completions",
         "chat/completions" if provider == "deepseek" else "v1/chat/completions",
@@ -188,7 +199,31 @@ def load_llm_config(env: dict | None = None) -> LLMConfig:
             "verify_tls", profile.get("verify_tls", True)
         )),
         ca_file=selected_environment.get("ca_file", profile.get("ca_file")),
+        **selection_options,
     )
+
+
+def _model_selection_options(profile: dict, environment: dict | None = None) -> dict:
+    """Resolve optional startup selection and workflow request limits."""
+    values = {**profile, **(environment or {})}
+    retries = values.get("workflow_retries")
+    if retries is not None:
+        if isinstance(retries, bool) or not isinstance(retries, int) or retries < 0:
+            raise ValueError("workflow_retries must be a nonnegative integer or null")
+    timeout = float(values.get("probe_timeout_seconds", 60.0))
+    if not 0 < timeout < float("inf"):
+        raise ValueError("probe_timeout_seconds must be a finite positive number")
+    priority = values.get("model_priority", ())
+    if not isinstance(priority, (list, tuple)) or any(
+        not isinstance(model, str) or not model.strip() for model in priority
+    ):
+        raise ValueError("model_priority must be a list of nonempty model names")
+    return {
+        "auto_select_model": bool(values.get("auto_select_model", False)),
+        "workflow_retries": retries,
+        "probe_timeout_seconds": timeout,
+        "model_priority": tuple(model.strip() for model in priority),
+    }
 
 
 def _default_headers(env: dict) -> dict:

@@ -3697,6 +3697,9 @@ def test_etf_holding_payload_error_splits_twenty_rows_into_weight_first_groups_o
     scores = ThemeWorkflow(llm, FakeQuotes(), {
         "etf_holding_relevance_batch": 20,
         "etf_holding_relevance_retry_budget": 20,
+        # This fixture asserts transport call order; parallel recovery grouping
+        # and ordered score application are exercised in test_etf_parallel.py.
+        "etf_llm_workers": 1,
     }).score_etf_holding_relevance({}, rows)
 
     assert len(llm.calls) == 5
@@ -3846,6 +3849,9 @@ def test_etf_holding_provider_error_recovers_failed_batch_once_and_continues():
         llm = FlakyLLM()
         scores = ThemeWorkflow(llm, FakeQuotes(), {
             "etf_holding_relevance_batch": 2,
+            # The first transport call intentionally identifies the failed
+            # A/B batch; concurrent failure isolation has separate coverage.
+            "etf_llm_workers": 1,
         }).score_etf_holding_relevance(
             {}, _rows("185:A", "185:B", "185:C", "185:D"))
     finally:

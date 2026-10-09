@@ -2,7 +2,7 @@
 
 Given an investing **theme**, the **date** it became hot, and a related **article URL**,
 this workflow returns the most exposed US stocks and ETFs plus an SEO FAQ, combining
-LLM semantic analysis (official DeepSeek Flash API by default) with live market data
+LLM semantic analysis (Office gateway with model selection at startup) with live market data
 (AInvest OpenAPI quote).
 
 ## Input
@@ -113,7 +113,8 @@ contract, catalyst, or financial-magnitude claims.
 7. **Independent narration + FAQ** — only after both baskets are frozen does narration begin.
    Each missing, malformed, mismatched, unsafe, or duplicated row gets one same-code retry and then
    deterministic bilingual fallback prose; narration never substitutes a security, changes order,
-   reduces counts, or fails the run. Strong stock cases follow business → event relationship →
+   reduces counts, or fails the run for a rejected narrative row. Exhausted LLM request retries
+   fail the entire run before upload. Strong stock cases follow business → event relationship →
    financial pathway. Weaker cases use business → core demand/scale/execution lever → financial
    pathway without exposing screening weakness. A run fails for counts only when the combined
    bounded live and offline universe lacks enough valid unique securities.
@@ -129,9 +130,13 @@ indirect public stock does not automatically become ETF holdings evidence. Baske
 treats the exact theme and frozen theme profile as authoritative; article context is secondary and
 may be empty. Every valid stock
 score already produced in the run is reused, including negative/ineligible evidence, and only
-unknown holdings are sent for component scoring. Payload-related HTTP 400/413/422 responses and
-retryable transport failures recover through bounded groups of at most five holdings, prioritized
-by portfolio-weight impact; authentication and configuration failures remain fail-closed. Basket ETF theme
+unknown holdings are sent for profile retrieval and component scoring. For profiles with
+`workflow_retries: null`, payload-related HTTP 400/413/422 responses, completion-token truncation,
+and retryable transport failures recover through groups of at most five holdings, prioritized by
+portfolio-weight impact, within one global budget of 100 companies and at most one workflow retry
+per company. The default Office profile retries the same logical request up to 200 times after
+its initial attempt; exhaustion aborts the run before smaller-batch recovery. Truncated responses
+never establish evidence; authentication, refusal, and configuration failures remain fail-closed. Basket ETF theme
 evidence is `70% × full-portfolio thematic mass + 15% × relevant-issuer breadth + 10% ×
 quality-weighted selected-stock coverage + 5% × canonical mandate corroboration`. Exact direct
 products use their underlying selected stock's causal quality; direct assets retain explicit
@@ -150,6 +155,16 @@ not an exclusion. Both asset classes receive public `Theme exposure` of
 a singleton receives 5.0 and an empty list remains empty. ETF fallback funds participate in the
 same ladder while retaining their original internal evidence. ETF selection, stock behavior,
 and the `ThemeEtfs` JSON shape remain unchanged.
+
+ETF inference and independent quote requests each run with four workers by default. Primary
+20-company batches are fixed before dispatch and merged in original order; recovery is chosen only
+after all primary requests finish. Quote pagination remains serial within each source. Candidate
+admission, discovery diversity, portfolio allocation, and ranking preserve their deterministic order
+and the full 40-portfolio / 5,000-company assessment budgets. Successful ETF metadata is cached only
+within a run. Use positive `--etf-llm-workers` and `--etf-quote-workers` values to control concurrency;
+set both to one for serial execution. Stage durations, request counts, truncations, retries, reused
+scores, semantic coverage, and selected fallback tiers are logged to stderr without changing the
+public result JSON.
 
 ## Run
 From the repository root, enter the workflow directory first:
@@ -181,12 +196,13 @@ The simplest default run is:
 ./run_theme.sh
 ```
 
-`run_theme.sh` automatically loads `.env.upload`, runs the official DeepSeek `deepseek-flash` workflow with
+`run_theme.sh` automatically loads `.env.upload`, runs the Office gateway workflow with
 `my_input.json` and the CLI's default `--limit 2000`, streams progress to the terminal and
 `run.log`, and stores the successful public result in Cloudflare. The runner first captures output
 in a temporary file and atomically replaces `result.json` only after the complete run succeeds. A
 genuine live-plus-offline universe-exhaustion failure exits nonzero, uploads nothing, and preserves
-the previous `result.json`; narration outages still produce a complete result.
+the previous `result.json`. Exhausted LLM request retries also fail the run before upload;
+individual narrative rows rejected by workflow validation can still use deterministic fallback.
 Arguments are forwarded to the CLI, so a smaller local-only run is:
 
 ```bash
@@ -242,13 +258,14 @@ Use `--no-upload` when an intentional local-only run is needed.
 python3 cli.py --no-upload > result.json 2>run.log
 ```
 
-*Note: the default runner selects the local official DeepSeek `deepseek-flash` profile.
+*Note: the default runner selects the local Office gateway profile and probes its current
+models at startup, retaining one model for the entire run.
 `--target` remains available for explicit local/overseas selection.*
 
 ## Config
 
 Configure endpoints and profile secrets in the gitignored `../Skills/env.json`.
-`DEEPSEEK_API_KEY` overrides the local DeepSeek profile's `api_key` when set.
+`OFFICE_API_KEY` overrides the local Office profile's `api_key` when set.
 Use `tail -f run.log` in another terminal to monitor progress.
 
 ```bash
@@ -268,8 +285,8 @@ python3 cli.py --target local \
 # use the overseas production gateway:
 python3 cli.py --target overseas --input my_input.json > result.json 2>run.log
 
-# optional Office-WiFi gateway profile from env.example.json:
-python3 cli.py --llm-profile office_wifi --input my_input.json > result.json 2>run.log
+# optional official DeepSeek Flash profile from env.example.json:
+python3 cli.py --llm-profile deepseek --input my_input.json > result.json 2>run.log
 
 # top 100 stocks by market cap + at most 100 theme-derived ETF candidates:
 python3 cli.py --target local --input my_input.json --limit 100 > result.json 2>run.log
@@ -302,6 +319,8 @@ tail -f run.log     # Ctrl-C to stop watching; the run keeps going
 #     --min-relevance-confidence F minimum confidence before stock eligibility (default 0.55)
 #     --etf-min-theme-score F absolute full-portfolio ETF threshold (default 0.25)
 #     --etf-holdings-portfolio-budget N maximum full equity-ETF assessments (default 40)
+#     --etf-llm-workers N     concurrent ETF inference requests; 1 is serial (default 4)
+#     --etf-quote-workers N   concurrent ETF quote requests; 1 is serial (default 4)
 #
 #   volume-confirmation / RVOL (finalist colour only)
 #     --rvol-threshold F      peak event-window RVOL required to be "volume-confirmed" (default 1.5)
@@ -331,18 +350,43 @@ Retry a completed `result.json` without rerunning any LLM or quote stages:
 ## Config
 Configure endpoints and profile secrets in the gitignored `../Skills/env.json`:
 - LLM: `active_profiles.llm` selects a profile; the default `llm_profiles.local` route uses
-  the official DeepSeek API at `https://api.deepseek.com/chat/completions` and
-  `deepseek-flash`, with thinking enabled, low reasoning effort, an 8,000-token completion
-  budget, and a 600-second timeout. `DEEPSEEK_API_KEY` overrides the profile's `api_key`.
-  Use `llm_profiles.office_wifi` for the optional Office-WiFi gateway, or `--target overseas`
-  for the production LLM and quote profiles.
+  the Office gateway at `https://aigw-office.myhexin.com/ai-gateway`, with Bearer
+  authentication and a unique `X-Trace-Id` per request. `OFFICE_API_KEY` overrides the
+  local or `office_wifi` auto-selection profile's `api_key`. Both example Office profiles
+  use low reasoning effort, an 8,000-token completion budget, and a 600-second request
+  timeout. Use `--llm-profile deepseek` for the optional official DeepSeek Flash profile
+  (`DEEPSEEK_API_KEY` overrides its saved key), or `--target overseas` for production.
 - Quotes: `active_scene` (use `c` off-network) + manually maintained cookie values
   (`sessionid`/`userid`). The application never logs in or refreshes these values.
 TLS verification is enabled by default. When no `ca_file` is configured, the client supplements
 Python's default trust store with the installed `certifi` bundle; configure `ca_file` when a
 corporate CA is required.
 
-The DeepSeek client uses `system` messages and sends the configured completion budget as
+With `auto_select_model: true`, every workflow run fetches a fresh catalog from `GET /models`
+and probes available text models through `POST /v1/chat/completions`. The probe uses the
+workflow's JSON-schema request format and must echo a random nonce. A listed model that
+times out, rejects the request, or returns empty or invalid JSON is skipped. Discovery failure
+or an entirely unusable catalog fails startup. Discovery and each probe use
+`probe_timeout_seconds` (default 60); each candidate receives one probe.
+
+All DeepSeek models are probed before any other family, including prefixed routes,
+parked variants, and newly listed DeepSeek versions. If none passes, the remaining
+preference begins with GPT-6 Astra, Claude Opus 5, Claude Fable 5, Claude Opus 4.8,
+GPT-5.6 Sol, Claude Sonnet 5, GPT-5.6 Terra, and GPT-5.6 Luna. Within each group, known
+gateway prefixes are grouped with their model family, parked variants are tried later,
+and unknown text models follow the configured families in deterministic order. Image,
+audio, and embedding models are skipped. `model_priority` refines the order within each
+group but cannot put another family ahead of DeepSeek. The probe checks availability
+and JSON compatibility; the remaining order is a project preference, not a quality guarantee.
+
+The chosen model stays fixed for the run; there is no automatic switching after startup.
+`workflow_retries: 200` permits an initial LLM request plus 200 retries for failed or empty
+responses. If no valid response arrives, the entire workflow fails, no result is uploaded,
+and `run_theme.sh` preserves the previous `result.json`. Set `workflow_retries` to another
+nonnegative integer to change that budget, or `null` to use the ordinary bounded client
+retry behavior. Explicit profiles with `auto_select_model: false` retain their configured model.
+
+The optional DeepSeek client uses `system` messages and sends the configured completion budget as
 `max_tokens`. Structured workflow requests use JSON object mode with the expected schema
 included in the prompt; existing workflow result validation checks identities, required fields,
 and accepted values. See the official [API reference](https://api-docs.deepseek.com/api/create-chat-completion)

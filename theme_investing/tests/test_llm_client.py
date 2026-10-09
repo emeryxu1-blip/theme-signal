@@ -1,4 +1,4 @@
-"""Offline contract tests for DeepSeek routing and compatible LLM calls."""
+"""Offline contract tests for office routing and compatible LLM calls."""
 
 from __future__ import annotations
 
@@ -111,6 +111,17 @@ def routing_env():
         "active_profiles": {"llm": "production", "quote": "production"},
         "llm_profiles": {
             "local": {
+                "provider": "litellm_openai_compatible",
+                "base_url": "https://office.example.test/litellm",
+                "api_key": "office-test-key",
+                "default_model": "gpt-5.6-sol",
+                "reasoning_effort": "low",
+                "timeout_seconds": 600,
+                "trace_header": "X-Trace-Id",
+                "workflow_retries": 200,
+                "auto_select_model": True,
+            },
+            "deepseek": {
                 "provider": "deepseek",
                 "base_url": "https://api.deepseek.com",
                 "api_key": "deepseek-test-key",
@@ -169,15 +180,25 @@ class LLMConfigRoutingTests(unittest.TestCase):
         self.assertEqual(status, 0)
         return captured["env"]
 
-    def test_local_target_routes_to_deepseek_profile_and_local_quotes(self):
+    def test_local_target_routes_to_office_profile_and_local_quotes(self):
         env = self._run_cli_and_capture_env("--target", "local", "--no-upload")
         self.assertEqual(env["active_profiles"], {
             "llm": "local", "quote": "local",
         })
         self.assertEqual(env["llm_profiles"]["local"]["provider"],
-                         "deepseek")
+                         "litellm_openai_compatible")
         self.assertEqual(env["llm_profiles"]["local"]["default_model"],
-                         "deepseek-flash")
+                         "gpt-5.6-sol")
+
+    def test_local_config_uses_office_gateway_and_workflow_retry_policy(self):
+        env = routing_env()
+        env["active_profiles"]["llm"] = "local"
+        cfg = config.load_llm_config(env)
+        self.assertEqual(cfg.base_url, "https://office.example.test/litellm/v1/chat/completions")
+        self.assertEqual(cfg.api_key, "office-test-key")
+        self.assertEqual(cfg.workflow_retries, 200)
+        self.assertTrue(cfg.auto_select_model)
+        self.assertEqual(cfg.probe_timeout_seconds, 60)
 
     def test_explicit_llm_profile_can_still_select_claude(self):
         env = self._run_cli_and_capture_env(
@@ -186,10 +207,10 @@ class LLMConfigRoutingTests(unittest.TestCase):
         self.assertEqual(env["active_profiles"]["llm"], "claude")
         self.assertEqual(env["llm_profiles"]["claude"]["provider"], "anthropic")
 
-    def test_local_config_defaults_to_flash_and_official_deepseek_endpoint(self):
+    def test_explicit_deepseek_config_defaults_to_flash_and_official_endpoint(self):
         env = routing_env()
-        env["active_profiles"]["llm"] = "local"
-        env["llm_profiles"]["local"].pop("default_model")
+        env["active_profiles"]["llm"] = "deepseek"
+        env["llm_profiles"]["deepseek"].pop("default_model")
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
             cfg = config.load_llm_config(env)
         self.assertEqual(cfg.base_url, "https://api.deepseek.com/chat/completions")
@@ -201,21 +222,23 @@ class LLMConfigRoutingTests(unittest.TestCase):
         self.assertIsNone(cfg.trace_header)
         self.assertTrue(cfg.verify_tls)
 
-    def test_checked_in_example_defaults_to_local_deepseek_and_is_loadable(self):
+    def test_checked_in_example_defaults_to_local_office_and_is_loadable(self):
         example_path = Path(__file__).resolve().parents[2] / "Skills" / "env.example.json"
         env = json.loads(example_path.read_text(encoding="utf-8"))
         cfg = config.load_llm_config(env)
         self.assertEqual(env["active_profiles"]["llm"], "local")
-        self.assertEqual(cfg.provider, "deepseek")
-        self.assertEqual(cfg.model, "deepseek-flash")
+        self.assertEqual(cfg.provider, "litellm_openai_compatible")
+        self.assertEqual(cfg.model, "gpt-6-astra")
         self.assertEqual(cfg.reasoning_effort, "low")
         self.assertEqual(cfg.max_completion_tokens, 8000)
-        self.assertEqual(cfg.thinking, {"type": "enabled"})
-        self.assertIsNone(cfg.trace_header)
+        self.assertIsNone(cfg.thinking)
+        self.assertEqual(cfg.trace_header, "X-Trace-Id")
         self.assertTrue(cfg.verify_tls)
+        self.assertEqual(cfg.workflow_retries, 200)
+        self.assertTrue(cfg.auto_select_model)
         self.assertEqual(
             cfg.base_url,
-            "https://api.deepseek.com/chat/completions",
+            "https://aigw-office.myhexin.com/ai-gateway/v1/chat/completions",
         )
         local_quotes = env["quote_profiles"]["local"]
         self.assertNotIn("login", local_quotes["auth"])
@@ -224,15 +247,15 @@ class LLMConfigRoutingTests(unittest.TestCase):
 
     def test_deepseek_environment_key_overrides_the_profile_key(self):
         env = routing_env()
-        env["active_profiles"]["llm"] = "local"
+        env["active_profiles"]["llm"] = "deepseek"
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "environment-test-key"}):
             cfg = config.load_llm_config(env)
         self.assertEqual(cfg.api_key, "environment-test-key")
 
     def test_deepseek_request_thinking_configuration_is_preserved(self):
         env = routing_env()
-        env["active_profiles"]["llm"] = "local"
-        env["llm_profiles"]["local"]["request"]["thinking"] = {"type": "disabled"}
+        env["active_profiles"]["llm"] = "deepseek"
+        env["llm_profiles"]["deepseek"]["request"]["thinking"] = {"type": "disabled"}
         cfg = config.load_llm_config(env)
         self.assertEqual(cfg.thinking, {"type": "disabled"})
 

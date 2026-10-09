@@ -67,6 +67,9 @@ class AInvestClient:
         self.retries = retries
         self.timeout = timeout
         self.names = _load_names()
+        # The configured trust store is immutable for this client and safe to
+        # share across independent quote requests.
+        self._ssl_context = cfg.ssl_context()
 
     # -- transport -----------------------------------------------------------
     def _post(self, url: str, body: dict) -> dict:
@@ -83,12 +86,13 @@ class AInvestClient:
             req = urllib.request.Request(url, data=data, headers=request_headers, method="POST")
             try:
                 with urllib.request.urlopen(
-                    req, timeout=self.timeout, context=self.cfg.ssl_context()
+                    req, timeout=self.timeout, context=self._ssl_context
                 ) as resp:
                     return json.loads(resp.read().decode("utf-8"))
             except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
                 last_err = exc
-                time.sleep(0.6 * (attempt + 1))
+                if attempt + 1 < self.retries:
+                    time.sleep(0.6 * (attempt + 1))
         raise RuntimeError(f"quote request failed after {self.retries} tries: {last_err}")
 
     # -- snapshot universe ---------------------------------------------------

@@ -6,12 +6,12 @@ Usage:
   python cli.py --input input.json --limit 60   # small live smoke test
 
   # pick the LLM API for THIS run without editing env.json:
-  python cli.py --target local --limit 120 '{...}'               # official DeepSeek Flash API
+  python cli.py --target local --limit 120 '{...}'               # Office-WiFi gateway; probe models before every run
   python cli.py --target overseas '{...}'                        # project key -> overseas production gateway
 
   # advanced: pick the raw profile/environment (override --target):
-  python cli.py --llm-profile local --limit 120 '{...}'          # official DeepSeek Flash profile
-  python cli.py --llm-profile office_wifi --limit 120 '{...}'    # optional Office-WiFi gateway
+  python cli.py --llm-profile local --limit 120 '{...}'          # Office-WiFi gateway with startup model selection
+  python cli.py --llm-profile office_wifi --limit 120 '{...}'    # explicit Office-WiFi profile
   python cli.py --llm-profile claude --limit 120 '{...}'         # optional if configured from env.example.json
   python cli.py --llm-profile production '{...}'                  # gateway; default env internal_equ (overseas prod)
   # choose a specific gateway environment (internal_equ / overseas_prod / wuchang_prod = production;
@@ -31,6 +31,7 @@ from ainvest_client import AInvestClient
 import config
 from config import load_llm_config, load_quote_config, load_env
 from llm_client import LLMClient
+from llm_errors import LLMWorkflowAbort
 from workflow import (DEFAULTS, SelectionUniverseError, StockRationaleError,
                       StockUniverseError, ThemeWorkflow)
 from theme_upload import ThemeUploadError, configured_upload, upload_result
@@ -115,6 +116,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="minimum absolute full-portfolio ETF theme score (default 0.25)")
     ap.add_argument("--etf-holdings-portfolio-budget", type=_nonnegative_int,
                     help="maximum equity ETF portfolios assessed in full (default 40)")
+    ap.add_argument("--etf-llm-workers", type=_positive_int,
+                    default=int(DEFAULTS["etf_llm_workers"]),
+                    help="maximum concurrent ETF inference requests; 1 runs serially (default 4)")
+    ap.add_argument("--etf-quote-workers", type=_positive_int,
+                    default=int(DEFAULTS["etf_quote_workers"]),
+                    help="maximum concurrent ETF quote requests; 1 runs serially (default 4)")
     ap.add_argument("--baseline-lookback", type=int,
                     help="number of pre-event trading bars used to compute the median "
                          "volume baseline for RVOL (default 20)")
@@ -122,7 +129,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="minimum pre-event bars required before the volume baseline is "
                          "trusted; candidates below this are penalised (default 5)")
     ap.add_argument("--target", choices=["local", "overseas"],
-                    help="pick the API set for this run: local=official DeepSeek Flash plus "
+                    help="pick the API set for this run: local=Office-WiFi gateway with "
+                         "startup model discovery/probing plus "
                          "public quote API; overseas=project LLM key plus production "
                          "quote API. --llm-profile/--llm-env/--quote-profile override this.")
     ap.add_argument("--llm-profile",
@@ -200,7 +208,8 @@ def workflow_options(args) -> dict:
                 "stock_target", "etf_target", "rvol_threshold",
                 "baseline_lookback", "min_history", "relevance_threshold",
                 "min_relevance_confidence", "etf_min_theme_score",
-                "etf_holdings_portfolio_budget"):
+                "etf_holdings_portfolio_budget", "etf_llm_workers",
+                "etf_quote_workers"):
         val = getattr(args, key)
         if val is not None:
             opts[key] = val
@@ -281,6 +290,9 @@ def main() -> int:
     wf = ThemeWorkflow(llm, quotes, opts)
     try:
         workflow_result = wf.run(payload)
+    except LLMWorkflowAbort as exc:
+        print(f"error: workflow aborted: {exc}", file=sys.stderr)
+        return 6
     except SelectionUniverseError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

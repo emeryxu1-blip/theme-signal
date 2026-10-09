@@ -10,11 +10,20 @@ This repository contains the theme-investing workflow and command-line interface
 
 The CLI uses the API keys and endpoints configured in `Skills/env.json`. Do not commit
 new API keys or publish existing keys outside the intended repository.
-The default local target uses the official [DeepSeek API](https://api-docs.deepseek.com/)
-with `deepseek-flash`. Set `DEEPSEEK_API_KEY` in the environment, or save the key in
-`llm_profiles.local.api_key` in the gitignored `Skills/env.json`; the environment value
-takes precedence. The example configuration retains the Office-WiFi gateway as the
-optional `office_wifi` LLM profile.
+The default local target uses the Office gateway at
+`https://aigw-office.myhexin.com/ai-gateway`. Set `OFFICE_API_KEY` in the environment,
+or save the key in `llm_profiles.local.api_key` in the gitignored `Skills/env.json`;
+the environment value takes precedence. Each run fetches the current model list and
+probes every available DeepSeek route before other model families, keeping the first model
+that returns the expected JSON. The selected model remains fixed throughout that run.
+The example also retains an explicit `office_wifi` profile and an optional `deepseek`
+profile for the official [DeepSeek API](https://api-docs.deepseek.com/).
+
+The default Office profile permits an initial request plus 200 retries for failed or
+empty LLM responses. Exhausting those retries fails the entire run and prevents result
+upload. Startup discovery and model probes have their own 60-second timeout; each
+candidate is probed once. `model_priority` refines the order within the DeepSeek group and
+the remaining models; DeepSeek always takes precedence.
 
 ### AInvest C-side manual session
 
@@ -92,12 +101,23 @@ Mandate wording corroborates an equity basket but does not gate its holdings ass
 Basket component scoring is theme-first: the exact theme and frozen profile are authoritative,
 while article evidence is secondary and may be empty. Valid stock scores already produced in the
 run, including negative scores, are reused; only unresolved holdings need another LLM request.
-Requests that fail because of payload size or a retryable transport error recover in bounded
-batches of at most five, ordered by portfolio-weight impact. Baskets still require at least 60%
+For profiles with `workflow_retries: null`, requests that fail because of payload size,
+completion-token truncation, or a retryable transport error recover in batches of at most five,
+ordered by portfolio-weight impact. Recovery shares a single 100-company budget with at most one
+workflow retry per company. The default Office profile instead retries the same logical request
+up to 200 times after its initial attempt; exhaustion aborts the run before smaller-batch recovery.
+Truncated responses never establish evidence. Baskets still require at least 60%
 reported weight. The normal semantic-coverage requirement is 80%; below it, a basket may qualify
 only when a conservative lower bound that counts unresolved holdings as zero still clears both the
 0.25 theme-score gate and the requirement for two relevant issuers. This partial-evidence mode is
 marked in diagnostics and does not change the public JSON schema.
+
+ETF inference and independent quote requests each use four workers by default. Candidate admission,
+portfolio budgets, and score merging retain their deterministic order; the full 40-portfolio /
+5,000-company budgets and all evidence gates remain unchanged. Set `--etf-llm-workers 1` and
+`--etf-quote-workers 1` for serial execution, or choose another positive worker count. Successful
+ETF metadata is reused within the run, and previously scored holdings skip profile requests.
+Stage durations, request and recovery counts, coverage, and selected fallback tiers go to stderr.
 
 Conventional baskets can represent upside exposure in bullish runs or vulnerable-company downside
 exposure in bearish runs. Before economic deduplication, ETFs with `output_eligible` true and
@@ -226,9 +246,10 @@ The result contains these top-level sections:
 
 ### `401 Authentication Error`
 
-For `--target local`, check the DeepSeek key in `DEEPSEEK_API_KEY` or
+For `--target local`, check the Office key in `OFFICE_API_KEY` or
 `llm_profiles.local.api_key` in `Skills/env.json`. This route uses Bearer authentication
-against `https://api.deepseek.com/chat/completions` with `deepseek-flash`.
+against `https://aigw-office.myhexin.com/ai-gateway`. The optional `deepseek` profile
+uses `DEEPSEEK_API_KEY` or its own saved profile key.
 
 ### `RemoteDisconnected` from the quote API
 

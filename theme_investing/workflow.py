@@ -25,6 +25,7 @@ import unicodedata
 from collections.abc import Iterable
 from collections import deque
 from itertools import islice
+from threading import Lock
 
 import prompts
 import scoring
@@ -34,7 +35,8 @@ from etf_preselection import (PreselectionResult, compose_output_etfs, preselect
                               requires_component_holdings,
                               rerank_with_component_holdings,
                               select_output_etfs)
-from llm_client import LLMClient
+from llm_client import LLMClient, LLMCompletionLimitError
+from parallel import ordered_map
 from universe_fallbacks import extend_etf_candidates
 
 # universe pool identifiers (validated against local AInvest references)
@@ -54,6 +56,8 @@ DEFAULTS = dict(
     max_scan=None,            # optional extra safety ceiling; 0/None disables it
     relevance_batch=10,       # bounded structured output fits the 4k response budget
     etf_holding_relevance_batch=20,   # same guard for component-company scoring
+    etf_llm_workers=4,       # independent ETF component requests in flight
+    etf_quote_workers=4,     # independent ETF discovery/portfolio requests in flight
     etf_holding_relevance_retry_budget=100,  # cap recovery after sparse/transient batches
     etf_holdings_unique_budget=5000,  # hard cap on deduplicated component companies scored
     etf_holdings_portfolio_budget=40, # maximum equity ETF portfolios assessed per run
@@ -129,8 +133,12 @@ class SelectionUniverseError(StockUniverseError):
             f"expected={self.expected} available={self.available} "
             f"sources={source_text}"
         )
+_LOG_LOCK = Lock()
+
+
 def _log(msg: str):
-    print(f"[theme-workflow] {msg}", file=sys.stderr, flush=True)
+    with _LOG_LOCK:
+        print(f"[theme-workflow] {msg}", file=sys.stderr, flush=True)
 
 
 def validate_input(payload: dict) -> dict:
@@ -2614,6 +2622,10 @@ class ThemeWorkflow:
         self.llm = llm
         self.quotes = quotes
         self.opts = {**DEFAULTS, **(opts or {})}
+        for key in ("etf_llm_workers", "etf_quote_workers"):
+            value = self.opts[key]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{key} must be a positive integer")
         self.as_of = _dt.date.today().isoformat()
         self._marketcode_resolver = marketcode_resolver
         self._marketcode_resolver_loaded = marketcode_resolver is not None
@@ -4088,6 +4100,20 @@ class ThemeWorkflow:
             _log(f"relevance: {n_missing}/{len(scores)} candidates unresolved after retry")
         return scores
 
+    @staticmethod
+    def _reusable_holding_score(raw_seed: object) -> dict | None:
+        """Use the same evidence validation for profile elision and score reuse."""
+        if not isinstance(raw_seed, dict) or raw_seed.get(
+                "relevance_status", "scored") != "scored":
+            return None
+        reused = _normalise_relevance_object(
+            raw_seed, status=raw_seed.get("relevance_status", "scored"))
+        if reused.get("relevance_status") != "scored":
+            return None
+        reused["relevance_retry"] = "reused_stock_score"
+        reused["relevance_source"] = "stock_score_reuse"
+        return reused
+
     def score_etf_holding_relevance(
         self, brief: dict, rows: list[dict], article: dict | None = None,
         *, seed_scores: dict[str, dict] | None = None,
@@ -4114,18 +4140,10 @@ class ThemeWorkflow:
         seeds = seed_scores if isinstance(seed_scores, dict) else {}
         pending_rows: list[dict] = []
         for row in rows:
-            raw_seed = seeds.get(row["code"])
-            if not isinstance(raw_seed, dict) or raw_seed.get(
-                    "relevance_status", "scored") != "scored":
+            reused = self._reusable_holding_score(seeds.get(row["code"]))
+            if reused is None:
                 pending_rows.append(row)
                 continue
-            reused = _normalise_relevance_object(
-                raw_seed, status=raw_seed.get("relevance_status", "scored"))
-            if reused.get("relevance_status") != "scored":
-                pending_rows.append(row)
-                continue
-            reused["relevance_retry"] = "reused_stock_score"
-            reused["relevance_source"] = "stock_score_reuse"
             scores[row["code"]] = reused
 
         ticker_scope_counts: dict[str, int] = {}
@@ -4157,35 +4175,61 @@ class ThemeWorkflow:
 
         batch_size = int(self.opts["etf_holding_relevance_batch"])
         batches = list(_batched(pending_rows, batch_size))
+        workers = self.opts["etf_llm_workers"]
         recoverable_codes: set[str] = set()
+        stage_started = time.monotonic()
+        reused_count = len(scores)
+        truncations = 0
+        failed_requests = 0
         _log(
             f"ETF holdings relevance: {len(rows)} component companies; "
-            f"{len(scores)} reused stock scores and {len(pending_rows)} companies in "
-            f"{len(batches)} serial LLM batches"
+            f"{reused_count} reused stock scores and {len(pending_rows)} companies in "
+            f"{len(batches)} LLM batches (workers={workers})"
         )
-        for batch_index, batch in enumerate(batches, 1):
+
+        def execute_batch(job):
+            batch_index, batch, retry, total = job
             started = time.monotonic()
+            phase = "retry" if retry else "batch"
             _log(
-                f"ETF holdings relevance batch {batch_index}/{len(batches)} "
+                f"ETF holdings relevance {phase} {batch_index}/{total} "
                 f"started ({len(batch)} companies)"
             )
-            raw = None
-            batch_may_retry = False
+            joined, raw, error = {}, None, None
             try:
                 joined, raw = score_batch(batch)
-                # A successful but incomplete/invalid response is safe to retry
-                # by identity because it did not fail for configuration reasons.
-                batch_may_retry = True
             except Exception as exc:
-                # Keep component assessment fail-closed at the same request
-                # boundary while allowing later batches and recovery to run.
-                _log(f"ETF holding relevance batch failed ({exc}); "
-                     f"marking {len(batch)} companies unresolved")
-                joined = {}
-                batch_may_retry = bool(
-                    getattr(exc, "retryable", False)
-                    or getattr(exc, "status_code", None) in {400, 413, 422}
-                )
+                # Workers return evidence/errors only. Score maps, identities,
+                # retry priority and budgets remain owned by the caller.
+                error = exc
+                if retry:
+                    _log(f"ETF holdings relevance retry failed ({exc}); "
+                         f"{len(batch)} companies remain unresolved")
+                else:
+                    _log(f"ETF holding relevance batch failed ({exc}); "
+                         f"marking {len(batch)} companies unresolved")
+            _log(
+                f"ETF holdings relevance {phase} {batch_index}/{total} "
+                f"finished in {time.monotonic() - started:.1f}s"
+            )
+            return batch_index, batch, joined, raw, error
+
+        primary_jobs = [
+            (index, batch, False, len(batches))
+            for index, batch in enumerate(batches, 1)
+        ]
+        for batch_index, batch, joined, raw, error in ordered_map(
+                execute_batch, primary_jobs, workers=workers):
+            failed_requests += int(error is not None)
+            truncations += int(isinstance(error, LLMCompletionLimitError))
+            # A complete but sparse response, truncation, size rejection or
+            # exhausted transient error can use the single global recovery lane.
+            batch_may_retry = bool(
+                error is None
+                or isinstance(error, LLMCompletionLimitError)
+                or getattr(error, "retryable", False)
+                or getattr(error, "status_code", None) in {400, 413, 422}
+            )
             for row in batch:
                 obj = joined.get(row["code"])
                 if obj is None:
@@ -4212,10 +4256,6 @@ class ThemeWorkflow:
                     f"ETF holdings relevance batch {batch_index}/{len(batches)} "
                     f"left {unresolved}/{len(batch)} unresolved ({shape})"
                 )
-            _log(
-                f"ETF holdings relevance batch {batch_index}/{len(batches)} "
-                f"finished in {time.monotonic() - started:.1f}s"
-            )
 
         recoverable_rows = [
             row for row in pending_rows
@@ -4243,20 +4283,14 @@ class ThemeWorkflow:
                 f"{len(unresolved_rows)} unresolved companies once"
             )
         retry_batches = list(_batched(unresolved_rows, 5))
-        for batch_index, batch in enumerate(retry_batches, 1):
-            started = time.monotonic()
-            _log(
-                f"ETF holdings relevance retry {batch_index}/{len(retry_batches)} "
-                f"started ({len(batch)} companies)"
-            )
-            try:
-                joined, _ = score_batch(batch)
-            except Exception as exc:
-                _log(
-                    f"ETF holdings relevance retry failed ({exc}); "
-                    f"{len(batch)} companies remain unresolved"
-                )
-                joined = {}
+        retry_jobs = [
+            (index, batch, True, len(retry_batches))
+            for index, batch in enumerate(retry_batches, 1)
+        ]
+        for _, batch, joined, _, error in ordered_map(
+                execute_batch, retry_jobs, workers=workers):
+            failed_requests += int(error is not None)
+            truncations += int(isinstance(error, LLMCompletionLimitError))
             for row in batch:
                 obj = joined.get(row["code"])
                 previous = scores.get(
@@ -4272,10 +4306,6 @@ class ThemeWorkflow:
                     else "persistent_miss"
                 )
                 scores[row["code"]] = retried
-            _log(
-                f"ETF holdings relevance retry {batch_index}/{len(retry_batches)} "
-                f"finished in {time.monotonic() - started:.1f}s"
-            )
 
         unresolved_count = sum(
             score.get("relevance_status") != "scored" for score in scores.values()
@@ -4285,6 +4315,17 @@ class ThemeWorkflow:
                 f"ETF holdings relevance: {unresolved_count}/{len(scores)} "
                 "companies unresolved after retry"
             )
+        recovered_count = sum(
+            score.get("relevance_retry") == "recovered" for score in scores.values()
+        )
+        _log(
+            "ETF holdings request summary: "
+            f"primary={len(batches)} recovery={len(retry_batches)} "
+            f"failed={failed_requests} truncated={truncations} "
+            f"reused={reused_count} recovered={recovered_count} "
+            f"unresolved={unresolved_count} workers={workers} "
+            f"elapsed={time.monotonic() - stage_started:.1f}s"
+        )
         return scores
 
     def rerank_etfs_from_components(
@@ -4310,15 +4351,13 @@ class ThemeWorkflow:
             if code and score.get("relevance_status") == "scored":
                 seed_scores[code] = score
 
-        def admit(candidate: dict) -> bool:
+        def admit(candidate: dict, holdings: list[dict], error: Exception | None) -> bool:
             code = candidate["code"]
             if code in attempted_codes or not requires_component_holdings(candidate):
                 return False
             attempted_codes.add(code)
-            try:
-                holdings = list(self.quotes.iter_etf_holdings(code))
-            except (AttributeError, RuntimeError) as exc:
-                _log(f"ETF holdings unavailable for {code}: {exc}")
+            if error is not None:
+                _log(f"ETF holdings unavailable for {code}: {error}")
                 return False
             if not holdings:
                 _log(f"ETF holdings unavailable for {code}: empty portfolio")
@@ -4510,9 +4549,12 @@ class ThemeWorkflow:
                        if code not in scored_components]
             if not pending:
                 return
+            profile_codes = [
+                row["code"] for row in pending
+                if self._reusable_holding_score(seed_scores.get(row["code"])) is None
+            ]
             try:
-                profiles = self.quotes.security_profiles(
-                    [row["code"] for row in pending])
+                profiles = self.quotes.security_profiles(profile_codes) if profile_codes else {}
             except AttributeError:
                 profiles = {}
             except RuntimeError as exc:
@@ -4530,18 +4572,39 @@ class ThemeWorkflow:
         # Spend the explicit portfolio budget before final ranking. Reaching the
         # requested output count is not a valid stopping rule: a later portfolio
         # can have stronger verified thematic mass than the first eligible funds.
-        for candidate_index, candidate in enumerate(assessment_order, 1):
-            if len(attempted_codes) >= portfolio_budget:
+        fetch_order = []
+        scheduled_codes: set[str] = set()
+        for candidate in assessment_order:
+            if len(fetch_order) >= portfolio_budget:
                 break
+            if candidate["code"] not in scheduled_codes and requires_component_holdings(candidate):
+                scheduled_codes.add(candidate["code"])
+                fetch_order.append(candidate)
+
+        def fetch_portfolio(job):
+            candidate_index, candidate = job
             started = time.monotonic()
             _log(
-                f"ETF holdings fetch {candidate_index}/{len(assessment_order)} "
+                f"ETF holdings fetch {candidate_index}/{len(fetch_order)} "
                 f"started ({candidate['code']})"
             )
-            admitted = admit(candidate)
+            holdings, error = [], None
+            try:
+                holdings = list(self.quotes.iter_etf_holdings(candidate["code"]))
+            except (AttributeError, RuntimeError) as exc:
+                error = exc
+            return candidate_index, candidate, holdings, error, time.monotonic() - started
+
+        for candidate_index, candidate, holdings, error, elapsed in ordered_map(
+                fetch_portfolio, enumerate(fetch_order, 1),
+                workers=self.opts["etf_quote_workers"]):
+            # Portfolio admission and first-seen names must never depend on
+            # network completion order. Keep full holdings separate from facts
+            # hydrated onto the deduplicated company-scoring rows.
+            admitted = admit(candidate, holdings, error)
             _log(
-                f"ETF holdings fetch {candidate_index}/{len(assessment_order)} "
-                f"finished in {time.monotonic() - started:.1f}s "
+                f"ETF holdings fetch {candidate_index}/{len(fetch_order)} "
+                f"finished in {elapsed:.1f}s "
                 f"status={'admitted' if admitted else 'skipped'}"
             )
 
@@ -7113,6 +7176,11 @@ class ThemeWorkflow:
             raise ValueError("stock_target cannot exceed the effective stock universe")
         if etf_target > etf_cap:
             raise ValueError("etf_target cannot exceed the effective ETF universe")
+        # Prepare anew for every run, including callers that bypass the CLI.
+        # A startup failure must escape before any article or quote request.
+        begin_workflow = getattr(self.llm, "begin_workflow", None)
+        if callable(begin_workflow):
+            begin_workflow()
         ev_int = scoring.event_date_int(inp["date"])
         _log(f"theme={inp['theme']!r} date={inp['date']} scene={self.quotes.cfg.scene}")
         _log(
@@ -7124,7 +7192,9 @@ class ThemeWorkflow:
             f"etf_portfolios={self.opts['etf_holdings_portfolio_budget']}, "
             f"etf_component_companies={self.opts['etf_holdings_unique_budget']}, "
             "etf_component_recovery="
-            f"{self.opts['etf_holding_relevance_retry_budget']}"
+            f"{self.opts['etf_holding_relevance_retry_budget']}, "
+            f"etf_llm_workers={self.opts['etf_llm_workers']}, "
+            f"etf_quote_workers={self.opts['etf_quote_workers']}"
         )
 
         started = time.monotonic()
@@ -7198,6 +7268,7 @@ class ThemeWorkflow:
 
         # Phase 1B: complete ETF assessment and freeze exact membership. A full
         # live/offline CE expansion runs only when strict discovery is short.
+        etf_selection_started = time.monotonic()
         etf_source_failures: list[str] = []
         if etf_target == 0:
             etf_result = PreselectionResult([], [], 0, 0, [])
@@ -7217,6 +7288,7 @@ class ThemeWorkflow:
                     theme_direction=theme_direction,
                     limit=etf_cap,
                     max_pools=int(self.opts.get("etf_theme_pools", 4)),
+                    quote_workers=self.opts["etf_quote_workers"],
                     log=_log,
                 )
             except Exception as exc:
@@ -7327,6 +7399,14 @@ class ThemeWorkflow:
                 or "none"
             )
         )
+        _log(
+            "ETF selected evidence tiers: "
+            + (", ".join(
+                f"{candidate['code']}={candidate.get('selection_tier', 'unknown')}"
+                f"/{candidate.get('selection_basis', 'unknown')}"
+                for candidate in top_etfs
+            ) or "none")
+        )
         low_liquidity_selected = [
             candidate["code"] for candidate in top_etfs
             if candidate.get("low_liquidity")
@@ -7355,6 +7435,11 @@ class ThemeWorkflow:
             f"ETFs={len(top_etfs)}/{etf_target}; "
             f"stock_codes={','.join(frozen_stock_codes) or '-'}; "
             f"etf_codes={','.join(frozen_etf_codes) or '-'}"
+        )
+        _log(
+            "ETF selection total finished in "
+            f"{time.monotonic() - etf_selection_started:.1f}s "
+            "(discovery, portfolio assessment and membership freeze; target=900s)"
         )
 
         # Market enrichment cannot reopen screening or change the frozen order.

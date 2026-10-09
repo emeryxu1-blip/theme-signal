@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from itertools import islice
 from typing import Callable, Iterable
 
+from parallel import ordered_map
+
 
 @dataclass(frozen=True)
 class PoolSpec:
@@ -1016,6 +1018,14 @@ def _exact_concept_index_sources(
     return sources
 
 
+def _usable_metadata(values: object) -> bool:
+    """A fallback name alone is not a successful metadata snapshot to reuse."""
+    return isinstance(values, dict) and any(
+        key != "name" and value not in (None, "")
+        for key, value in values.items()
+    )
+
+
 def _discover(
     quotes,
     stocks: list[dict],
@@ -1028,6 +1038,8 @@ def _discover(
     canonical_evidence: CanonicalThemeEvidence | None = None,
     canonical_diagnostics: dict[str, object] | None = None,
     source_counts: dict[str, dict[str, int]] | None = None,
+    quote_workers: int = 1,
+    metadata_cache: dict[str, dict] | None = None,
 ) -> tuple[dict[str, dict], int]:
     """Discover bounded stock-derived and curated ETF candidates.
 
@@ -1087,48 +1099,64 @@ def _discover(
     # products whose holding weight is null and therefore sorts after ordinary
     # physical holders. The raw scan is bounded separately from retained unique
     # candidates, so it cannot make the final candidate universe unbounded.
-    stock_rows: list[tuple[dict, list[dict], list[dict]]] = []
-    for stock in stocks:
+    has_stock_relations = hasattr(quotes, "iter_stock_etfs")
+    dedicated_relations = (
+        ("inverse", "leveraged")
+        if _theme_direction(theme_direction) == "bearish"
+        else ("leveraged", "long")
+    )
+    relation_tasks = [
+        (stock, relation)
+        for stock in stocks
+        for relation in (
+            ("related", *dedicated_relations)
+            if has_stock_relations and is_public_stock(stock)
+            else ("related",)
+        )
+    ]
+
+    def fetch_relation(task: tuple[dict, str]) -> tuple[list[dict], str | None]:
+        stock, relation = task
         code = stock["code"]
+        scan_limit = (
+            _GENERIC_RELATED_SCAN_MAX if relation == "related"
+            else _DIRECT_PROBE_SCAN_MAX
+        )
         try:
-            if hasattr(quotes, "iter_stock_etfs"):
+            if has_stock_relations:
                 iterator = quotes.iter_stock_etfs(
-                    code, relation="related", page_size=_GENERIC_RELATED_SCAN_MAX)
+                    code, relation=relation, page_size=scan_limit)
             else:
                 iterator = quotes.iter_related_etfs(
-                    code, page_size=_GENERIC_RELATED_SCAN_MAX)
-            rows = list(islice(
-                iterator, _GENERIC_RELATED_SCAN_MAX,
-            ))
+                    code, page_size=scan_limit)
+            return list(islice(iterator, scan_limit)), None
         except RuntimeError as exc:
+            prefix = "stock" if relation == "related" else f"stock-{relation}"
+            return [], f"{prefix}:{code}: {exc}"
+
+    # Workers only fetch. Consume in the original stock/relation order so source
+    # diagnostics, first-seen metadata, and later admission ties stay stable.
+    relation_results = iter(list(ordered_map(
+        fetch_relation, relation_tasks, workers=quote_workers,
+    )))
+    stock_rows: list[tuple[dict, list[dict], list[dict]]] = []
+    for stock in stocks:
+        rows, error = next(relation_results)
+        if error is not None:
             stock_source_failed = True
-            failures.append(f"stock:{code}: {exc}")
-            rows = []
+            failures.append(error)
         add_source_count("generic_stock", "raw", len(rows))
 
         dedicated_rows: list[dict] = []
         if not is_public_stock(stock):
             dedicated_rows = []
-        elif hasattr(quotes, "iter_stock_etfs"):
-            dedicated_relations = (
-                ("inverse", "leveraged")
-                if _theme_direction(theme_direction) == "bearish"
-                else ("leveraged", "long")
-            )
+        elif has_stock_relations:
             dedicated_by_code: dict[str, dict] = {}
             for dedicated_relation in dedicated_relations:
-                try:
-                    relation_rows = list(islice(
-                        quotes.iter_stock_etfs(
-                            code, relation=dedicated_relation,
-                            page_size=_DIRECT_PROBE_SCAN_MAX,
-                        ),
-                        _DIRECT_PROBE_SCAN_MAX,
-                    ))
-                except RuntimeError as exc:
+                relation_rows, error = next(relation_results)
+                if error is not None:
                     stock_source_failed = True
-                    failures.append(
-                        f"stock-{dedicated_relation}:{code}: {exc}")
+                    failures.append(error)
                     continue
                 add_source_count(
                     "dedicated_direct", "raw", len(relation_rows))
@@ -1370,11 +1398,19 @@ def _discover(
             add_source_count("recovery", "raw", len(recovery_codes))
             try:
                 recovery_metadata = quotes.etf_metadata(recovery_codes)
+                if metadata_cache is not None:
+                    metadata_cache.update({
+                        code: dict(values)
+                        for code, values in recovery_metadata.items()
+                        if _usable_metadata(values)
+                    })
             except RuntimeError as exc:
                 failures.append(f"direct-recovery-metadata: {exc}")
                 recovery_metadata = {}
             for recovery_code, values in recovery_metadata.items():
-                row = {"code": recovery_code, **dict(values or {})}
+                if not isinstance(values, dict):
+                    continue
+                row = {"code": recovery_code, **values}
                 underlying, _ = _verified_single_stock_leverage(
                     row, public_stock_codes, theme_direction)
                 if not underlying:
@@ -1419,15 +1455,34 @@ def _discover(
     return candidates, excluded
 
 
-def _enrich(quotes, candidates: dict[str, dict], stocks: list[dict], failures: list[str]) -> None:
+def _enrich(
+    quotes, candidates: dict[str, dict], stocks: list[dict], failures: list[str],
+    *, quote_workers: int = 1, metadata_cache: dict[str, dict] | None = None,
+) -> None:
     codes = list(candidates)
     if not codes:
         return
-    try:
-        metadata = quotes.etf_metadata(codes)
-    except RuntimeError as exc:
-        failures.append(f"metadata: {exc}")
-        metadata = {}
+    cached = metadata_cache if metadata_cache is not None else {}
+    metadata = {
+        code: cached[code] for code in codes if _usable_metadata(cached.get(code))
+    }
+    missing_codes = [code for code in codes if code not in metadata]
+    if missing_codes:
+        try:
+            fetched = quotes.etf_metadata(missing_codes)
+        except RuntimeError as exc:
+            failures.append(f"metadata: {exc}")
+        else:
+            # Current names remain useful even when other snapshot facts are
+            # unavailable; only evidence-bearing rows suppress later fetches.
+            metadata.update({
+                code: values for code, values in fetched.items()
+                if isinstance(values, dict)
+            })
+            cached.update({
+                code: dict(values) for code, values in fetched.items()
+                if _usable_metadata(values)
+            })
     for code, values in metadata.items():
         candidate = candidates.get(code)
         if not candidate:
@@ -1438,12 +1493,19 @@ def _enrich(quotes, candidates: dict[str, dict], stocks: list[dict], failures: l
 
     # One indicator / request is intentional. The quote API does not reliably
     # return repeated holding-weight indicator ids with different match_code attrs.
-    for stock in stocks:
+    def fetch_weights(stock: dict) -> tuple[dict, str | None]:
         stock_code = stock["code"]
         try:
             weights = quotes.etf_holding_weights_for_stock(codes, stock_code)
         except RuntimeError as exc:
-            failures.append(f"holding-weight:{stock_code}: {exc}")
+            return {}, f"holding-weight:{stock_code}: {exc}"
+        return weights, None
+
+    for stock, (weights, error) in zip(stocks, ordered_map(
+            fetch_weights, stocks, workers=quote_workers)):
+        stock_code = stock["code"]
+        if error is not None:
+            failures.append(error)
             continue
         for code, raw_weight in weights.items():
             weight = _finite_float(raw_weight)
@@ -2670,8 +2732,12 @@ def preselect_etfs(
     max_pools: int = 4,
     theme_direction: str = "bullish",
     log: Callable[[str], None] | None = None,
+    quote_workers: int = 1,
 ) -> PreselectionResult:
     """Rank bounded ordinary candidates plus additive exact direct probes."""
+    if (isinstance(quote_workers, bool) or not isinstance(quote_workers, int)
+            or quote_workers < 1):
+        raise ValueError("quote_workers must be a positive integer")
     if limit <= 0:
         raise ValueError("ETF candidate limit must be greater than 0")
     direction_mode = _theme_direction(theme_direction)
@@ -2694,6 +2760,7 @@ def preselect_etfs(
         for bucket in _DISCOVERY_SOURCE_BUCKETS
     }
     failures: list[str] = []
+    metadata_cache: dict[str, dict] = {}
     exclusion_reasons: dict[str, int] = {}
     exclusion_examples: dict[str, list[str]] = {}
     candidates, discovery_excluded = _discover(
@@ -2708,8 +2775,13 @@ def preselect_etfs(
         canonical_evidence=canonical_evidence,
         canonical_diagnostics=canonical_diagnostics,
         source_counts=discovery_source_counts,
+        quote_workers=quote_workers,
+        metadata_cache=metadata_cache,
     )
-    _enrich(quotes, candidates, stocks, failures)
+    _enrich(
+        quotes, candidates, stocks, failures,
+        quote_workers=quote_workers, metadata_cache=metadata_cache,
+    )
     for candidate in candidates.values():
         mandate_verified, mandate_terms = _mandate_match(
             candidate,
