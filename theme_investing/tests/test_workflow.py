@@ -5228,6 +5228,70 @@ def test_run_keeps_exact_wrapper_when_all_basket_holdings_are_unavailable():
     assert codes[0] == "185:NVDL"
 
 
+def test_run_prioritizes_inverse_etfs_for_a_grounded_single_company_event():
+    class EventLLM(ScriptedLLM):
+        def __init__(self, article_role):
+            super().__init__({})
+            self.article_role = article_role
+
+        def chat_json(self, system, user, **kwargs):
+            if system == workflow_module.prompts.EVENT_BRIEF_SYS:
+                return {
+                    "theme_direction": "bearish",
+                    "title_lede_entities": [{
+                        "name": "NVIDIA", "ticker": "NVDA",
+                        "article_role": self.article_role,
+                    }],
+                }
+            return super().chat_json(system, user, **kwargs)
+
+    class EventQuotes(FakeQuotes):
+        _ETF_DATA = {
+            **FakeQuotes._ETF_DATA,
+            "185:NVD": dict(
+                FakeQuotes._ETF_DATA["185:NVDQ"],
+                name="GraniteShares 2x Short NVDA Daily ETF",
+            ),
+            "185:NVDS": dict(
+                FakeQuotes._ETF_DATA["185:NVDQ"], leverage=-1.5,
+                name="Tradr 1.5X Short NVDA Daily ETF",
+            ),
+        }
+
+        def live_etf_codes(self, *, page_size=1000):
+            return list(self._ETF_DATA)
+
+    original_fetch_article = workflow_module.fetch_article
+    workflow_module.fetch_article = lambda url: {
+        "ok": True, "url": url,
+        "title": "Jensen Huang Admits Affair as NVIDIA Faces a Test",
+        "text": "Jensen Huang, CEO of NVIDIA (NASDAQ: NVDA), admitted to an affair.",
+    }
+    payload = {"theme": "Jensen Huang Affair", "date": "2026-11-09",
+               "url": "https://example.com/jensen-huang"}
+    inverse_funds = {"185:NVD", "185:NVDQ", "185:NVDS"}
+    try:
+        for role in ("subject", "other"):
+            workflow = ThemeWorkflow(
+                EventLLM(role), EventQuotes(),
+                {"stock_universe": 20, "stock_target": 2, "etf_universe": 20,
+                 "etf_holdings_portfolio_budget": 0},
+                marketcode_resolver=_neocloud_resolver(),
+            )
+            result = workflow.run(payload)
+            codes = [item["market_code"] for item in result["ThemeEtfs"]]
+            assert len(codes) == len(set(codes)) == 5
+            assert result["ThemeStocks"][0]["market_code"] == "185:NVDA"
+            assert workflow._last_stock_evidence == []
+            assert "185:NVDL" not in codes
+            if role == "subject":
+                assert set(codes[:3]) == inverse_funds
+            else:
+                assert inverse_funds.isdisjoint(codes)
+    finally:
+        workflow_module.fetch_article = original_fetch_article
+
+
 def _neocloud_profile():
     return {
         "exact_theme": "Neocloud",

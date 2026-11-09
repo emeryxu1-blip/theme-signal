@@ -1040,6 +1040,8 @@ def _discover(
     source_counts: dict[str, dict[str, int]] | None = None,
     quote_workers: int = 1,
     metadata_cache: dict[str, dict] | None = None,
+    focused_stock_code: str | None = None,
+    focused_wrapper_target: int = 0,
 ) -> tuple[dict[str, dict], int]:
     """Discover bounded stock-derived and curated ETF candidates.
 
@@ -1350,24 +1352,28 @@ def _discover(
     # Dedicated relations are the fast path, but availability differs across
     # deployments and newly listed wrappers can lag a relation index. Recover
     # once from the live ETF universe when any selected-stock source failed or
-    # when no exact wrapper was verified at all. The recovery stays outside the
-    # ordinary basket cap and still fails closed on structured CE, benchmark,
-    # direction, and leverage metadata.
+    # when verified wrappers are missing or too sparse for a single-issuer
+    # theme. Recovery stays outside the ordinary basket cap and uses the same
+    # structured CE, benchmark, direction, and leverage checks.
     public_stocks_by_code = {
         stock["code"]: stock for stock in stocks if is_public_stock(stock)
     }
     public_stock_codes = set(public_stocks_by_code)
-    verified_direct_codes = {
+    verified_underlyings = [
         underlying
         for candidate in candidates.values()
         for underlying, _ in [
             _verified_single_stock_leverage(
                 candidate, public_stock_codes, theme_direction)
         ]
-        if underlying
-    }
+        if underlying and not _is_explicit_etn(candidate)
+    ]
+    focus_needs_recovery = (
+        focused_stock_code in public_stock_codes
+        and verified_underlyings.count(focused_stock_code) < focused_wrapper_target
+    )
     needs_live_recovery = bool(public_stock_codes) and (
-        stock_source_failed or not verified_direct_codes
+        stock_source_failed or not verified_underlyings or focus_needs_recovery
     )
     if needs_live_recovery:
         recovery_codes: list[str] = []
@@ -1743,6 +1749,8 @@ def _rank_candidates(
     stocks: list[dict],
     limit: int,
     theme_direction: str = "bullish",
+    *,
+    focused_stock_code: str | None = None,
 ) -> tuple[list[dict], int]:
     """Classify candidates into explicit direct, basket, and asset lanes."""
     direction_mode = _theme_direction(theme_direction)
@@ -1851,12 +1859,16 @@ def _rank_candidates(
         candidate.update(common)
 
         if underlying_code:
-            evidence_score = max(0.0, min(1.0, quality.get(underlying_code, 0.0)))
+            focused_match = underlying_code == focused_stock_code
+            # The exact benchmark expresses the entire verified issuer focus.
+            # Stock causal quality still measures structural fit for other funds.
+            evidence_score = 1.0 if focused_match else quality[underlying_code]
             inverse = derivative.direction == "short"
             candidate.update({
                 "selection_lane": SINGLE_STOCK_LEVERAGED_LANE,
                 "ranking_mode": SINGLE_STOCK_LEVERAGED_LANE,
                 "underlying_code": underlying_code,
+                "focused_underlying_match": focused_match,
                 # Stock-related ratios on derivative products can be effective
                 # exposure rather than physical portfolio weight. The exact
                 # benchmark owns this lane, so do not present those ratios as
@@ -2654,7 +2666,8 @@ def compose_output_etfs(
 ) -> list[dict]:
     """Compose exactly ``target`` ETFs whenever the supplied pool permits it.
 
-    Eligible evidence of at least 0.375 takes priority over weaker rows.
+    Verified wrappers on a focused issuer lead even when they share a benchmark.
+    For the remaining slots, eligible evidence of at least 0.375 takes priority.
     The historical best-wrapper and conventional-basket reservations
     apply inside each evidence band, so a weaker reservation cannot displace
     stronger evidence. A genuinely exhausted input pool returns short so the
@@ -2671,13 +2684,24 @@ def compose_output_etfs(
     if not pool:
         return []
 
+    focused = sorted((
+        candidate for candidate in pool
+        if candidate.get("focused_underlying_match")
+        and candidate.get("output_eligible")
+        and candidate.get("selection_lane") == SINGLE_STOCK_LEVERAGED_LANE
+    ), key=_ranking_key)[:target]
+    if len(focused) == target:
+        return focused
+    focused_codes = {candidate["code"] for candidate in focused}
+    pool = [candidate for candidate in pool if candidate["code"] not in focused_codes]
+
     strong = [
         candidate for candidate in pool if _meets_etf_exposure_preference(candidate)
     ]
     weaker = [
         candidate for candidate in pool if not _meets_etf_exposure_preference(candidate)
     ]
-    selected = _compose_etf_band(strong, target)
+    selected = [*focused, *_compose_etf_band(strong, target - len(focused))]
     if len(selected) < target:
         selected.extend(_compose_etf_band(weaker, target - len(selected)))
     return selected
@@ -2733,6 +2757,8 @@ def preselect_etfs(
     theme_direction: str = "bullish",
     log: Callable[[str], None] | None = None,
     quote_workers: int = 1,
+    focused_stock_code: str | None = None,
+    focused_wrapper_target: int = 0,
 ) -> PreselectionResult:
     """Rank bounded ordinary candidates plus additive exact direct probes."""
     if (isinstance(quote_workers, bool) or not isinstance(quote_workers, int)
@@ -2777,6 +2803,8 @@ def preselect_etfs(
         source_counts=discovery_source_counts,
         quote_workers=quote_workers,
         metadata_cache=metadata_cache,
+        focused_stock_code=focused_stock_code,
+        focused_wrapper_target=focused_wrapper_target,
     )
     _enrich(
         quotes, candidates, stocks, failures,
@@ -2794,6 +2822,7 @@ def preselect_etfs(
         candidate["mandate_terms"] = mandate_terms
     ranked, ranking_excluded = _rank_candidates(
         candidates, stocks, limit, direction_mode,
+        focused_stock_code=focused_stock_code,
     )
     for candidate in candidates.values():
         reason = str(candidate.get("exclusion_reason") or "").strip()

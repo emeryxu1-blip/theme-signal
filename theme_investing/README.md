@@ -85,8 +85,9 @@ contract, catalyst, or financial-magnitude claims.
    that recall, and exact `American Consumer`, `U.S. consumer`, and equivalent aliases route to
    both Consumer Staples and Consumer Discretionary discovery. Ordinary basket candidates have a
    hard 500-name cap; verified direct probes are additive. A live ETF-universe scan is used once
-   to recover exact wrappers when stock-specific sources fail or return none, with the local CE
-   list as the final ETF screening fallback. Output-eligible products with authoritative static
+   to recover exact wrappers when stock-specific sources fail, return none, or return too few
+   wrappers for a majority in a single-issuer theme. The local CE list is the final screening
+   fallback. Output-eligible products with authoritative static
    exposure of at least 0.375 receive preference before deduplication, including permitted
    economic overlaps, followed by weaker candidates in their existing order. Theme-adjacent
    discovered funds, broader live `CE` products, and the offline `CE` universe fill any shortfall.
@@ -102,7 +103,9 @@ contract, catalyst, or financial-magnitude claims.
    as zero exposure—still clears the same score and issuer gates; this partial-evidence mode is
    explicitly logged. A free-form mandate mismatch cannot block holdings assessment; canonical
    mandate alignment is only a 5% corroborating signal. Direct-asset products still require
-   explicit canonical mandate evidence. Within each exposure-preference group, composition
+   explicit canonical mandate evidence. When the theme names a single issuer or the matching
+   headline has one grounded issuer as its subject, verified wrappers on that issuer take the
+   first slots even if they share the same underlying. Within each remaining exposure group, composition
    prioritizes an eligible leveraged wrapper and reserves a conventional-basket slot when the
    target allows it; weaker products cannot displace preferred funds. If needed for the exact
    target, lower tiers may include inverse, leveraged, option-income, buffered, hedged,
@@ -139,7 +142,8 @@ its initial attempt; exhaustion aborts the run before smaller-batch recovery. Tr
 never establish evidence; authentication, refusal, and configuration failures remain fail-closed. Basket ETF theme
 evidence is `70% × full-portfolio thematic mass + 15% × relevant-issuer breadth + 10% ×
 quality-weighted selected-stock coverage + 5% × canonical mandate corroboration`. Exact direct
-products use their underlying selected stock's causal quality; direct assets retain explicit
+products use their underlying selected stock's causal quality, with full theme evidence for
+an exact benchmark on a verified single-issuer focus. Direct assets retain explicit
 canonical mandate/pool evidence. Investability is `50% × turnover percentile + 35% × AUM
 percentile + 15% × inverse expense-ratio percentile`, with missing metrics scoring zero. Final ETF
 rank within each preference group is `80% × theme evidence + 10% × investability + 10% ×
@@ -153,8 +157,7 @@ $25 million or current turnover below $1 million is a soft warning and ranking d
 not an exclusion. Both asset classes receive public `Theme exposure` of
 `round(5.0 - 2.0 * index / (count - 1), 1)` in frozen selection order, with zero-based `index`;
 a singleton receives 5.0 and an empty list remains empty. ETF fallback funds participate in the
-same ladder while retaining their original internal evidence. ETF selection, stock behavior,
-and the `ThemeEtfs` JSON shape remain unchanged.
+same ladder while retaining their original internal evidence.
 
 ETF inference and independent quote requests each run with four workers by default. Primary
 20-company batches are fixed before dispatch and merged in original order; recovery is chosen only

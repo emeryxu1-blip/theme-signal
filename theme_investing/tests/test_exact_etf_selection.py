@@ -14,6 +14,8 @@ from etf_preselection import (  # noqa: E402
     MULTI_STOCK_BASKET_LANE,
     SINGLE_STOCK_LEVERAGED_LANE,
     compose_output_etfs,
+    preselect_etfs,
+    rerank_with_component_holdings,
     select_output_etfs,
 )
 
@@ -381,3 +383,106 @@ def test_direct_and_select_then_compose_are_deterministic_for_custom_targets():
     assert [row["code"] for row in select_output_etfs(
         copy.deepcopy(candidates), limit=2,
     )] == expected[:2]
+
+
+@pytest.mark.parametrize("focused_stock_code", [None, "185:NVDA"])
+def test_single_company_event_keeps_verified_inverse_etfs_through_selection(
+    focused_stock_code,
+):
+    def wrapper(name, ticker, leverage, direction="Short"):
+        return {
+            "name": name, "security_class": "CE", "leverage": leverage,
+            "direction": direction, "benchmark_code": f"185:{ticker}",
+        }
+
+    funds = {
+        "185:NVD": wrapper("GraniteShares 2x Short NVDA Daily ETF", "NVDA", 2),
+        "171:NVDQ": wrapper("T-REX 2X Inverse NVIDIA Daily Target ETF", "NVDA", 2),
+        "185:NVDS": wrapper("Tradr 1.5X Short NVDA Daily ETF", "NVDA", 1.5),
+        "185:NVDL": wrapper("GraniteShares 2x Long NVDA Daily ETF", "NVDA", 2, "Long"),
+        "169:DAMD": wrapper("Defiance Daily Target 2X Short AMD ETF", "AMD", 2),
+        "169:VGT": {
+            "name": "Vanguard Information Technology ETF", "security_class": "CE",
+            "leverage": 1, "direction": "Long",
+        },
+    }
+
+    class Quotes:
+        def __init__(self):
+            self.recovery_calls = 0
+
+        def iter_stock_etfs(self, stock_code, relation="related", *, page_size):
+            if relation == "related":
+                yield {"code": "169:VGT", "holding_weight": 5, **funds["169:VGT"]}
+            elif stock_code == "185:NVDA":
+                for code in ("185:NVD", "185:NVDL"):
+                    yield {"code": code, **funds[code]}
+            elif stock_code == "185:AMD":
+                yield {"code": "169:DAMD", **funds["169:DAMD"]}
+
+        def live_etf_codes(self, *, page_size):
+            self.recovery_calls += 1
+            return list(funds)
+
+        def etf_metadata(self, codes):
+            return {code: funds[code] for code in codes}
+
+        def etf_holding_weights_for_stock(self, codes, stock_code):
+            return {}
+
+    strong_stock_evidence = {
+        "ai_relevance": 5.0, "confidence": 0.98, "exposure_type": "direct",
+        "theme_specificity": "company_specific", "materiality": "high",
+        "evidence_strength": "explicit", "impact_channel": "revenue_demand",
+        "relevance_status": "scored",
+    }
+    stocks = [
+        {"code": "185:NVDA", "name": "NVIDIA", "is_public_theme_stock": True,
+         "ai_relevance": 1.0, "relevance_status": "scored"},
+        {"code": "185:AMD", "name": "Advanced Micro Devices",
+         "is_public_theme_stock": True, **strong_stock_evidence},
+    ]
+    focus_options = (
+        {"focused_stock_code": focused_stock_code, "focused_wrapper_target": 3}
+        if focused_stock_code else {}
+    )
+    quotes = Quotes()
+    result = preselect_etfs(
+        quotes, stocks, theme="Jensen Huang Affair", brief={},
+        article_title="Jensen Huang Admits Affair as NVIDIA Faces a Test",
+        limit=10, theme_direction="bearish", **focus_options,
+    )
+    holdings = {"169:VGT": [
+        {"code": "185:AMD", "name": "Advanced Micro Devices", "weight_pct": 45},
+        {"code": "185:AVGO", "name": "Broadcom", "weight_pct": 45},
+    ]}
+    relevance = {
+        "185:AMD": strong_stock_evidence, "185:AVGO": strong_stock_evidence,
+    }
+    rerank_with_component_holdings(
+        result.candidates, holdings, relevance, theme_direction="bearish",
+    )
+    candidates = {candidate["code"]: candidate for candidate in result.candidates}
+    assert "185:NVDL" not in candidates
+    assert candidates["169:VGT"]["output_eligible"] is True
+
+    if focused_stock_code:
+        assert quotes.recovery_calls == 1
+        selected = compose_output_etfs(select_output_etfs(result.candidates), 5)
+        assert {row["code"] for row in selected[:3]} == {
+            "185:NVD", "171:NVDQ", "185:NVDS",
+        }
+        assert {row["code"] for row in selected[3:]} == {"169:DAMD", "169:VGT"}
+        assert all(
+            row["focused_underlying_match"] and row["output_eligible"]
+            and row["static_theme_exposure"] == 1.0
+            and row["underlying_code"] == "185:NVDA" and row["is_inverse"]
+            and not row["matched_holdings"]
+            for row in selected[:3]
+        )
+    else:
+        assert quotes.recovery_calls == 0
+        assert candidates["185:NVD"]["output_eligible"] is False
+        assert [row["code"] for row in compose_output_etfs(result.candidates, 2)] == [
+            "169:DAMD", "169:VGT",
+        ]

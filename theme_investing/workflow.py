@@ -2571,6 +2571,47 @@ def _selection_score(candidate: dict) -> float:
     return THEME_SCORE_WEIGHT * semantic + ARTICLE_SCORE_WEIGHT * article
 
 
+def _focused_etf_stock_code(
+    candidates: list[dict], public_codes: tuple[str, ...], theme: str, article: dict,
+) -> str | None:
+    """Find a single grounded issuer before considering the frozen stock rank."""
+    label = _normalised_text(theme)
+    headline = _normalised_text(article.get("title")).casefold()
+    label_terms = set(re.findall(r"[^\W_]+", label.casefold()))
+    headline_terms = set(re.findall(r"[^\W_]+", headline))
+    headline_matches = (
+        len(label_terms) >= 2 and label_terms <= headline_terms
+    ) or bool(re.search(r"[\u4e00-\u9fff]{4,}", label) and label.casefold() in headline)
+
+    focused_codes: set[str] = set()
+    competing_codes: set[str] = set()
+    for candidate in candidates:
+        code = candidate["code"]
+        ticker = code.partition(":")[2]
+        provenance = candidate.get("candidate_provenance") or []
+        profile_operator = (
+            "theme_profile" in provenance
+            and candidate.get("entity_role") in {"direct_operator", "pure_play_operator"}
+        )
+        article_subject = bool(
+            candidate.get("article_subject") and candidate.get("article_anchor_evidence")
+        )
+        if profile_operator or candidate.get("theme_eligible") or article_subject:
+            competing_codes.add(code)
+        if (
+            _entity_is_mentioned({"name": candidate.get("name"), "ticker": ticker}, label)
+            or (profile_operator and ticker and re.search(
+                rf"(?<![\w.-]){re.escape(ticker)}(?![\w.-])", label))
+            or (article_subject and headline_matches)
+        ):
+            focused_codes.add(code)
+
+    if len(focused_codes) != 1 or competing_codes - focused_codes:
+        return None
+    (focused_code,) = focused_codes
+    return focused_code if focused_code in public_codes else None
+
+
 def _is_semantically_eligible(candidate: dict, *, threshold: float,
                               min_confidence: float) -> bool:
     """Hard evidence gate applied before output slots are filled."""
@@ -3117,6 +3158,8 @@ class ThemeWorkflow:
                 existing["name_zh"] = entity["resolved_name_zh"]
             if provenance == "title_lede":
                 existing["guaranteed_article_anchor"] = True
+                if entity and entity.get("article_role") == "subject":
+                    existing["article_subject"] = True
                 literal = _verified_candidate_article_evidence(
                     existing, article, entity)
                 if literal:
@@ -3180,6 +3223,8 @@ class ThemeWorkflow:
                     candidate["name_zh"] = entity["resolved_name_zh"]
             if provenance == "title_lede":
                 candidate["guaranteed_article_anchor"] = True
+                if entity and entity.get("article_role") == "subject":
+                    candidate["article_subject"] = True
                 literal = _verified_candidate_article_evidence(
                     candidate, article, entity)
                 if literal:
@@ -7277,6 +7322,11 @@ class ThemeWorkflow:
             _log("etf_target=0; ETF screening disabled")
         else:
             started = time.monotonic()
+            focused_stock_code = _focused_etf_stock_code(
+                stock_candidates, frozen_stock_codes, inp["theme"], art,
+            )
+            if focused_stock_code:
+                _log(f"ETF single-issuer focus: {focused_stock_code}")
             _log(f"ETF preselection started (ordinary candidate limit={etf_cap})")
             try:
                 etf_result = preselect_etfs(
@@ -7289,6 +7339,8 @@ class ThemeWorkflow:
                     limit=etf_cap,
                     max_pools=int(self.opts.get("etf_theme_pools", 4)),
                     quote_workers=self.opts["etf_quote_workers"],
+                    focused_stock_code=focused_stock_code,
+                    focused_wrapper_target=etf_target // 2 + 1,
                     log=_log,
                 )
             except Exception as exc:
